@@ -24,14 +24,16 @@
 
     <key>EnvironmentVariables</key>
     <dict>
-        <key>NTFY_SERVER</key>
-        <string>https://ntfy.sh</string>
-        <key>NTFY_TOPIC</key>
-        <string>REPLACE-WITH-YOUR-PRIVATE-TOPIC</string>
+        <!-- Brrr backend (recommended). Secret is read from the Keychain
+             service 'remotessh-brrr-webhook-secret' — do NOT put it here. -->
+        <key>BRRR_API_URL</key>
+        <string>REPLACE-WITH-YOUR-BRRR-WEBHOOK-URL</string>
         <key>SILENCE_SECS</key>
         <string>20</string>
         <key>TMUX_BIN</key>
         <string>/opt/homebrew/bin/tmux</string>
+        <!-- ntfy is the fallback backend; leave BRRR_API_URL set to use Brrr.
+        <key>NTFY_TOPIC</key><string>your-private-topic</string> -->
     </dict>
 
     <key>RunAtLoad</key>

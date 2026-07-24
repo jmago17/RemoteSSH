@@ -37,17 +37,20 @@ No notifications yet — see the roadmap below.
 | 5 | App icon (Icon Composer), device signing | ✅ |
 | 5 | **Multi-host** support (add/edit/delete/switch hosts) | ✅ |
 | 5 | Terminal font-size control | ✅ |
-| — | APNs-backed background notifications (v1 uses ntfy app for background) | ⬜ |
+| — | **Background push via Brrr** (Mac watcher → Brrr webhook → APNs) | ✅ |
 | — | Copy/paste selection polish, scrollback search | ⬜ |
 
-### Notifications setup (Mac side)
+### Notifications setup
 
-1. Pick a hard-to-guess ntfy topic (anyone with it can notify you).
-2. Edit `scripts/com.danobat.remotessh.notify.plist` (script path + `NTFY_TOPIC`),
-   copy to `~/Library/LaunchAgents/`, then `launchctl load` it.
-3. In the app: Settings → Notifications → enable, set the same topic.
-4. For **background** pushes (app closed), also subscribe to the topic in the
-   [ntfy iOS app] — its APNs delivery works when RemoteSSH is suspended.
+**Recommended: Brrr** — real background push via the Brrr app (works when
+RemoteSSH is closed). Full guide: [`docs/notifications-brrr.md`](docs/notifications-brrr.md).
+In short: create a Brrr webhook, store its secret in the Keychain, set
+`BRRR_API_URL` in `scripts/com.danobat.remotessh.notify.plist`, and `launchctl
+load` it.
+
+**Fallback: ntfy** — leave `BRRR_API_URL` unset and set `NTFY_TOPIC`. The in-app
+Settings → Notifications subscribes in the foreground and deep-links via
+`remotessh://open/<session>`.
 
 ## Confirmed decisions
 

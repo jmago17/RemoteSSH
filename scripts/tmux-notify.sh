@@ -1,22 +1,27 @@
 #!/bin/bash
 #
-# tmux-notify.sh — watch tmux sessions and push a notification (via ntfy) when a
-# session "needs attention". Runs on the Mac as a LaunchAgent; RemoteSSH on the
-# phone (or the ntfy app) receives the push.
+# tmux-notify.sh — watch tmux sessions and push a notification when a session
+# "needs attention". Delivers via Brrr (real background push, recommended) or
+# ntfy. Runs on the Mac as a LaunchAgent.
 #
 # "Needs attention" = a session that was active and then went SILENT for
 # $SILENCE_SECS (a long command finished / Claude Code is waiting on you), or a
 # pane matching $ATTENTION_REGEX (approval prompts, y/N, etc.).
 #
-# Configure via environment (or edit the defaults below):
-#   NTFY_SERVER   default https://ntfy.sh
-#   NTFY_TOPIC    required — your private topic, e.g. remotessh-a8f3k2 (keep it secret)
-#   SILENCE_SECS  default 20   — quiet-after-activity threshold
-#   POLL_SECS     default 5
-#   ATTENTION_REGEX  extra regex that always triggers (egrep syntax)
+# Backend (auto: Brrr if BRRR_API_URL is set, else ntfy):
+#   Brrr — set BRRR_API_URL (your webhook URL) and the secret via either
+#          BRRR_WEBHOOK_SECRET, or the macOS Keychain (see BRRR_KEYCHAIN_SERVICE).
+#   ntfy — set NTFY_TOPIC (and optional NTFY_SERVER).
+#
+# Common config:
+#   SILENCE_SECS  default 20   POLL_SECS default 5
+#   ATTENTION_REGEX  extra egrep pattern that always triggers
 #   TMUX_BIN      default $(command -v tmux)
 set -u
 
+BACKEND="${NOTIFY_BACKEND:-}"
+BRRR_API_URL="${BRRR_API_URL:-}"
+BRRR_KEYCHAIN_SERVICE="${BRRR_KEYCHAIN_SERVICE:-remotessh-brrr-webhook-secret}"
 NTFY_SERVER="${NTFY_SERVER:-https://ntfy.sh}"
 NTFY_TOPIC="${NTFY_TOPIC:-}"
 SILENCE_SECS="${SILENCE_SECS:-20}"
@@ -24,23 +29,48 @@ POLL_SECS="${POLL_SECS:-5}"
 ATTENTION_REGEX="${ATTENTION_REGEX:-(\\? \\[y/N\\]|\\(y/n\\)|Do you want|Press ENTER|Proceed\\?|approval|waiting for your)}"
 TMUX_BIN="${TMUX_BIN:-$(command -v tmux)}"
 
-if [ -z "$NTFY_TOPIC" ]; then
-  echo "ERROR: set NTFY_TOPIC (your private ntfy topic)." >&2
-  exit 1
-fi
-if [ -z "$TMUX_BIN" ] || [ ! -x "$TMUX_BIN" ]; then
-  echo "ERROR: tmux not found; set TMUX_BIN." >&2
-  exit 1
+# Pick a backend automatically if not forced.
+if [ -z "$BACKEND" ]; then
+  if [ -n "$BRRR_API_URL" ]; then BACKEND="brrr"; else BACKEND="ntfy"; fi
 fi
 
-declare -A last_hash last_change notified
+if [ -z "$TMUX_BIN" ] || [ ! -x "$TMUX_BIN" ]; then
+  echo "ERROR: tmux not found; set TMUX_BIN." >&2; exit 1
+fi
+if [ "$BACKEND" = "brrr" ] && [ -z "$BRRR_API_URL" ]; then
+  echo "ERROR: BACKEND=brrr but BRRR_API_URL is unset." >&2; exit 1
+fi
+if [ "$BACKEND" = "ntfy" ] && [ -z "$NTFY_TOPIC" ]; then
+  echo "ERROR: BACKEND=ntfy but NTFY_TOPIC is unset." >&2; exit 1
+fi
 
 now() { date +%s; }
 
-notify() {
+# Brrr webhook secret: env first, else macOS Keychain (never printed).
+load_brrr_secret() {
+  if [ -n "${BRRR_WEBHOOK_SECRET:-}" ]; then printf '%s' "$BRRR_WEBHOOK_SECRET"; return 0; fi
+  /usr/bin/security find-generic-password -a "${USER:-$(id -un)}" -s "$BRRR_KEYCHAIN_SERVICE" -w 2>/dev/null
+}
+
+notify_brrr() {
+  local session="$1" body="$2" secret
+  secret="$(load_brrr_secret)"
+  if [ -z "$secret" ]; then
+    echo "Brrr secret missing (env BRRR_WEBHOOK_SECRET or Keychain service '$BRRR_KEYCHAIN_SERVICE')." >&2
+    return 1
+  fi
+  # Brrr uses the first line as the notification title, the rest as the body.
+  printf '%s needs attention\n%s' "$session" "${body:-Session is waiting}" | \
+    /usr/bin/curl --fail --silent --show-error --max-time 15 \
+      -X POST "$BRRR_API_URL" \
+      -H "Authorization: Bearer $secret" \
+      -H "Content-Type: text/plain; charset=utf-8" \
+      --data-binary @- >/dev/null 2>&1
+}
+
+notify_ntfy() {
   local session="$1" body="$2"
-  # Title = session name; Click opens RemoteSSH deep-linked to that session.
-  curl -fsS \
+  /usr/bin/curl -fsS \
     -H "Title: ${session} needs attention" \
     -H "Tags: bell" \
     -H "Click: remotessh://open/$(printf %s "$session" | sed 's/ /%20/g')" \
@@ -48,10 +78,18 @@ notify() {
     "${NTFY_SERVER}/${NTFY_TOPIC}" >/dev/null 2>&1
 }
 
-echo "tmux-notify watching (server=$NTFY_SERVER topic=$NTFY_TOPIC silence=${SILENCE_SECS}s)"
+notify() {
+  case "$BACKEND" in
+    brrr) notify_brrr "$1" "$2" ;;
+    ntfy) notify_ntfy "$1" "$2" ;;
+  esac
+}
+
+echo "tmux-notify watching (backend=$BACKEND silence=${SILENCE_SECS}s)"
+
+declare -A last_hash last_change notified
 
 while true; do
-  # List sessions; skip if no server.
   sessions="$("$TMUX_BIN" list-sessions -F '#S' 2>/dev/null)" || sessions=""
   while IFS= read -r s; do
     [ -z "$s" ] && continue
@@ -61,12 +99,8 @@ while true; do
     t="$(now)"
 
     if [ "${last_hash[$s]:-}" != "$hash" ]; then
-      # Activity: content changed since last poll.
-      last_hash[$s]="$hash"
-      last_change[$s]="$t"
-      notified[$s]=0
+      last_hash[$s]="$hash"; last_change[$s]="$t"; notified[$s]=0
     else
-      # Unchanged since last poll.
       quiet=$(( t - ${last_change[$s]:-$t} ))
       if [ "${notified[$s]:-0}" -eq 0 ]; then
         if printf %s "$pane" | grep -Eq "$ATTENTION_REGEX"; then
