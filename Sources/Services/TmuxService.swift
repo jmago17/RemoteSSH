@@ -90,6 +90,25 @@ struct TmuxService {
         }
     }
 
+    /// Restores previously-saved tmux sessions via the tmux-resurrect plugin
+    /// (e.g. after a Mac reboot). Returns `true` if the restore script ran,
+    /// `false` if tmux-resurrect isn't installed.
+    func restoreSessions(config: SSHConnectionConfig, credential: SSHCredential) async throws -> Bool {
+        try await withShell(config: config, credential: credential) { shell in
+            // Look in the common tmux-resurrect install locations (TPM default,
+            // XDG config, and XDG data), run restore.sh if present.
+            let script = """
+            export \(Self.pathPrefix); \
+            for d in "$HOME/.tmux/plugins/tmux-resurrect" "$HOME/.config/tmux/plugins/tmux-resurrect" "$HOME/.local/share/tmux/plugins/tmux-resurrect"; do \
+              if [ -x "$d/scripts/restore.sh" ]; then "$d/scripts/restore.sh" >/dev/null 2>&1; echo __RESTORED__; exit 0; fi; \
+            done; \
+            echo __NORESURRECT__
+            """
+            let out = try await shell.run(script)
+            return out.contains("__RESTORED__")
+        }
+    }
+
     // MARK: Connection lifecycle
 
     /// Runs `body` against a connected shell, guaranteeing disconnect. The

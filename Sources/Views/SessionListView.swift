@@ -62,6 +62,18 @@ struct SessionListView: View {
                         }
                         .accessibilityLabel("New Session")
                     }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Button {
+                                Task { await model.restoreSessions() }
+                            } label: {
+                                Label("Restore Saved Sessions", systemImage: "arrow.clockwise.circle")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                        .accessibilityLabel("More")
+                    }
                 }
                 if model.isRefreshing {
                     ToolbarItem(placement: .topBarLeading) {
@@ -154,6 +166,8 @@ struct SessionListView: View {
             } description: {
                 Text("No tmux sessions are running on \(model.config.host).")
             } actions: {
+                Button("Restore Saved Sessions") { Task { await model.restoreSessions() } }
+                    .buttonStyle(.borderedProminent)
                 Button("Refresh") { Task { await model.refresh() } }
             }
         }

@@ -12,11 +12,12 @@ Working name: *TmuxChat*. Product/bundle name: **RemoteSSH**
   (`tmux list-sessions` + `capture-pane`).
 - Foreground polling (configurable interval); pull-to-refresh.
 - Unread dot when a pane changed since you last opened it.
-- Tap a session → **thread view** with a **Peek / Attach** toggle:
-  - **Peek** — read-only scrollback (`capture-pane -S -2000`), doesn't disturb the pane.
-  - **Attach** — full **interactive SwiftTerm terminal** over a live SSH PTY
-    (`tmux attach`); typing works, resizes on rotation/keyboard.
-- Session management: **create** (`+`), **kill**, **rename** (swipe actions).
+- Tap a session → full **interactive SwiftTerm terminal** over a live SSH PTY
+  (`tmux attach`); typing works, resizes on rotation/keyboard.
+  - On-screen special keys: **Shift+Tab** (`ESC[Z`), plus an Esc/Tab/Ctrl-C menu.
+  - **Reconnect** if the attach drops (also auto-reconnects on foreground return).
+- Session management: **create** (`+`), **kill**, **rename** (swipe actions),
+  and **Restore Saved Sessions** via tmux-resurrect (toolbar menu + empty state).
 - Settings: host / username / port, password *or* ed25519 private key,
   poll interval. Secret stored in the **iOS Keychain**, never on disk.
 

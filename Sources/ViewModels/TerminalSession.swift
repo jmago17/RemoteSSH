@@ -62,8 +62,7 @@ final class TerminalSession {
                 )
                 await self?.finish(error: nil)
             } catch {
-                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                await self?.finish(error: message)
+                await self?.finish(error: Self.friendlyMessage(for: error))
             }
         }
     }
@@ -117,5 +116,16 @@ final class TerminalSession {
 
     private func finish(error: String?) {
         phase = .closed(error)
+    }
+
+    /// A closed/EOF channel just means the session detached or ended — show the
+    /// neutral "Session ended" rather than a raw NIO error. Real auth/network
+    /// failures keep their message.
+    private static func friendlyMessage(for error: Error) -> String? {
+        let text = "\(error)"
+        if text.contains("ChannelError") || text.contains("EOF") || text.localizedCaseInsensitiveContains("closed") {
+            return nil
+        }
+        return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 }

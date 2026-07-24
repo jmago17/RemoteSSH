@@ -114,6 +114,21 @@ final class SessionListModel {
         }
     }
 
+    /// Restores saved tmux sessions via tmux-resurrect, then refreshes.
+    func restoreSessions() async {
+        guard let credential = store.loadCredential(for: config) else { return }
+        do {
+            let restored = try await tmux.restoreSessions(config: config, credential: credential)
+            if restored {
+                await refresh()
+            } else {
+                errorMessage = "tmux-resurrect isn't installed on \(config.host). Install it to restore saved sessions."
+            }
+        } catch {
+            errorMessage = friendly(error)
+        }
+    }
+
     private func mutate(
         _ body: (TmuxService, SSHConnectionConfig, SSHCredential) async throws -> Void
     ) async {

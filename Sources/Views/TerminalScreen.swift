@@ -8,13 +8,16 @@ struct TerminalScreen: View {
 
     @State private var terminal: TerminalSession?
     @State private var setupError: String?
+    @State private var generation = 0
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
             if let terminal {
-                TerminalHostView(session: terminal)
+                // A new id on reconnect forces a fresh SwiftTerm view + attach.
+                TerminalHostView(session: terminal).id(generation)
                 statusOverlay(terminal)
             } else if let setupError {
                 ContentUnavailableView {
@@ -53,6 +56,11 @@ struct TerminalScreen: View {
             setup()
         }
         .onDisappear { terminal?.stop() }
+        .onChange(of: scenePhase) { _, phase in
+            // iOS suspends the socket in the background; re-attach on return so
+            // the pane catches up near-seamlessly.
+            if phase == .active, case .closed = terminal?.phase { reconnect() }
+        }
     }
 
     @ViewBuilder
@@ -68,18 +76,32 @@ struct TerminalScreen: View {
                     .padding(.bottom, 24)
             }
         case .closed(let message):
-            VStack {
+            VStack(spacing: 12) {
                 Spacer()
                 Label(message ?? "Session ended", systemImage: "bolt.horizontal.circle")
                     .font(.footnote)
                     .foregroundStyle(message == nil ? Color.secondary : Color.orange)
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .background(.ultraThinMaterial, in: Capsule())
-                    .padding(.bottom, 24)
+                Button {
+                    reconnect()
+                } label: {
+                    Label("Reconnect", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.bottom, 24)
             }
         case .live:
             EmptyView()
         }
+    }
+
+    private func reconnect() {
+        terminal?.stop()
+        terminal = nil
+        setupError = nil
+        generation += 1
+        setup()
     }
 
     private func setup() {
