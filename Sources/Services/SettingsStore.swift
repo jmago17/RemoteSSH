@@ -8,6 +8,9 @@ struct SettingsStore {
     private let defaults: UserDefaults
     private let configKey = "activeConnectionConfig"
     private let pollKey = "pollIntervalSeconds"
+    private let ntfyServerKey = "ntfyServer"
+    private let ntfyTopicKey = "ntfyTopic"
+    private let notificationsEnabledKey = "notificationsEnabled"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -36,6 +39,26 @@ struct SettingsStore {
             return v > 0 ? v : 5
         }
         nonmutating set { defaults.set(newValue, forKey: pollKey) }
+    }
+
+    // MARK: Notifications (ntfy)
+
+    var ntfyServer: String {
+        get {
+            let v = defaults.string(forKey: ntfyServerKey) ?? ""
+            return v.isEmpty ? "https://ntfy.sh" : v
+        }
+        nonmutating set { defaults.set(newValue, forKey: ntfyServerKey) }
+    }
+
+    var ntfyTopic: String {
+        get { defaults.string(forKey: ntfyTopicKey) ?? "" }
+        nonmutating set { defaults.set(newValue, forKey: ntfyTopicKey) }
+    }
+
+    var notificationsEnabled: Bool {
+        get { defaults.bool(forKey: notificationsEnabledKey) }
+        nonmutating set { defaults.set(newValue, forKey: notificationsEnabledKey) }
     }
 
     // MARK: Secret (Keychain)

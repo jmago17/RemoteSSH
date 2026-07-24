@@ -113,6 +113,14 @@ struct SessionListView: View {
             model.reloadConfig()
             model.startPolling()
         }
+        .onChange(of: model.pendingOpenSession) { _, name in
+            guard let name else { return }
+            if !path.contains(where: { $0.name == name }) {
+                path.append(TmuxSession(name: name, isAttached: false, created: .now,
+                                        lastActivity: .now, preview: "", contentHash: 0))
+            }
+            model.pendingOpenSession = nil
+        }
         .onDisappear { model.stopPolling() }
     }
 

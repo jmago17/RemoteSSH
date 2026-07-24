@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LaunchAgent for tmux-notify.sh. Edit the placeholders, then install:
+
+    mkdir -p ~/Library/LaunchAgents ~/Library/Logs
+    cp scripts/com.danobat.remotessh.notify.plist ~/Library/LaunchAgents/
+    # edit the copy: set the script path and NTFY_TOPIC
+    launchctl load ~/Library/LaunchAgents/com.danobat.remotessh.notify.plist
+
+  Stop / reload:
+    launchctl unload ~/Library/LaunchAgents/com.danobat.remotessh.notify.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.danobat.remotessh.notify</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/ABSOLUTE/PATH/TO/RemoteSSH/scripts/tmux-notify.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NTFY_SERVER</key>
+        <string>https://ntfy.sh</string>
+        <key>NTFY_TOPIC</key>
+        <string>REPLACE-WITH-YOUR-PRIVATE-TOPIC</string>
+        <key>SILENCE_SECS</key>
+        <string>20</string>
+        <key>TMUX_BIN</key>
+        <string>/opt/homebrew/bin/tmux</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/remotessh-notify.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/remotessh-notify.err</string>
+</dict>
+</plist>

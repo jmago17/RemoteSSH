@@ -6,8 +6,9 @@ DerivedData/
 *.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcuserstate
 
-## XcodeGen generates this from project.yml — do not commit
+## XcodeGen generates these from project.yml — do not commit
 RemoteSSH.xcodeproj/
+RemoteSSH-Info.plist
 
 ## SPM
 .swiftpm/

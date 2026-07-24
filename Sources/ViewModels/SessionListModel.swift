@@ -14,8 +14,24 @@ final class SessionListModel {
     var config: SSHConnectionConfig
     var pollInterval: TimeInterval
 
+    /// Set when a notification/deep-link asks to open a session; the list view
+    /// observes this and navigates.
+    var pendingOpenSession: String?
+
+    /// Set by the app to deliver an ntfy "needs attention" message as an iOS
+    /// notification (session name, body).
+    @ObservationIgnored var onAttention: ((String, String) -> Void)?
+
+    /// Set by the app to request iOS notification permission.
+    @ObservationIgnored var onRequestNotificationAuth: (() -> Void)?
+
+    func requestNotificationAuthorization() {
+        onRequestNotificationAuth?()
+    }
+
     private let store = SettingsStore()
     private let tmux = TmuxService()
+    private let ntfy = NtfySubscriber()
     private var pollTask: Task<Void, Never>?
 
     /// Last pane hash the user has actually seen, per session name.
@@ -38,6 +54,31 @@ final class SessionListModel {
     func reloadConfig() {
         config = store.loadConfig()
         pollInterval = store.pollInterval
+        restartNotifications()
+    }
+
+    // MARK: Notifications
+
+    /// Opens a session from a notification tap or `remotessh://open/<name>` link.
+    func requestOpen(_ name: String) {
+        pendingOpenSession = name
+    }
+
+    /// (Re)subscribes to the ntfy topic if notifications are enabled.
+    func restartNotifications() {
+        let enabled = store.notificationsEnabled
+        let server = store.ntfyServer
+        let topic = store.ntfyTopic
+        let onMessage: @Sendable (String, String) -> Void = { [weak self] session, body in
+            Task { @MainActor in self?.onAttention?(session, body) }
+        }
+        Task { [ntfy] in
+            if enabled, !topic.isEmpty {
+                await ntfy.start(server: server, topic: topic, onMessage: onMessage)
+            } else {
+                await ntfy.stop()
+            }
+        }
     }
 
     // MARK: Polling lifecycle

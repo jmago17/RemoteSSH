@@ -12,6 +12,10 @@ struct SettingsView: View {
     @State private var hasExistingSecret = false
     @State private var saveError: String?
 
+    @State private var notificationsEnabled = false
+    @State private var ntfyServer = "https://ntfy.sh"
+    @State private var ntfyTopic = ""
+
     private let store = SettingsStore()
 
     var body: some View {
@@ -78,6 +82,29 @@ struct SettingsView: View {
                     }
                 }
 
+                Section {
+                    Toggle("Notifications", isOn: $notificationsEnabled)
+                    if notificationsEnabled {
+                        LabeledContent("ntfy Server") {
+                            TextField("https://ntfy.sh", text: $ntfyServer)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .keyboardType(.URL)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        LabeledContent("Topic") {
+                            TextField("your-private-topic", text: $ntfyTopic)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+                } header: {
+                    Text("Notifications")
+                } footer: {
+                    Text("Get pushed when a session needs attention. Run scripts/tmux-notify.sh on your Mac and subscribe to the same private topic here (and in the ntfy app for background pushes). Pick a hard-to-guess topic — anyone with it can send you notifications.")
+                }
+
                 if let saveError {
                     Section {
                         Label(saveError, systemImage: "exclamationmark.triangle")
@@ -101,6 +128,9 @@ struct SettingsView: View {
             draft = model.config
             interval = model.pollInterval
             hasExistingSecret = store.hasStoredSecret(for: draft)
+            notificationsEnabled = store.notificationsEnabled
+            ntfyServer = store.ntfyServer
+            ntfyTopic = store.ntfyTopic
         }
     }
 
@@ -121,6 +151,11 @@ struct SettingsView: View {
                 saveError = "Enter a \(draft.authKind == .password ? "password" : "private key")."
                 return
             }
+
+            store.notificationsEnabled = notificationsEnabled
+            store.ntfyServer = ntfyServer.trimmingCharacters(in: .whitespaces)
+            store.ntfyTopic = ntfyTopic.trimmingCharacters(in: .whitespaces)
+            if notificationsEnabled { model.requestNotificationAuthorization() }
 
             model.reloadConfig()
             dismiss()
