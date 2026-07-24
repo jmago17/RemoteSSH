@@ -18,6 +18,8 @@ enum TestSeed {
         guard let host = env["REMOTESSH_HOST"], let user = env["REMOTESSH_USER"] else { return }
 
         var config = SSHConnectionConfig()
+        // Stable id so repeated seeded launches update rather than duplicate.
+        config.id = UUID(uuidString: "DEB00000-0000-0000-0000-000000000001") ?? config.id
         config.name = "Localhost"
         config.host = host
         config.username = user
@@ -26,11 +28,13 @@ enum TestSeed {
         let store = SettingsStore()
         if let key = env["REMOTESSH_KEY"], !key.isEmpty {
             config.authKind = .privateKey
-            store.saveConfig(config)
+            store.upsertHost(config)
+            store.activeHostID = config.id
             try? store.saveSecret(key, for: config)
         } else if let password = env["REMOTESSH_PASSWORD"], !password.isEmpty {
             config.authKind = .password
-            store.saveConfig(config)
+            store.upsertHost(config)
+            store.activeHostID = config.id
             try? store.saveSecret(password, for: config)
         }
     }

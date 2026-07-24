@@ -6,7 +6,9 @@ import Foundation
 /// unencrypted.
 struct SettingsStore {
     private let defaults: UserDefaults
-    private let configKey = "activeConnectionConfig"
+    private let configKey = "activeConnectionConfig"   // legacy single-host key
+    private let hostsKey = "hosts"
+    private let activeHostKey = "activeHostID"
     private let pollKey = "pollIntervalSeconds"
     private let ntfyServerKey = "ntfyServer"
     private let ntfyTopicKey = "ntfyTopic"
@@ -16,19 +18,62 @@ struct SettingsStore {
         self.defaults = defaults
     }
 
-    // MARK: Connection config
+    // MARK: Hosts
 
-    func loadConfig() -> SSHConnectionConfig {
-        guard let data = defaults.data(forKey: configKey),
-              let config = try? JSONDecoder().decode(SSHConnectionConfig.self, from: data)
-        else { return SSHConnectionConfig() }
-        return config
+    func loadHosts() -> [SSHConnectionConfig] {
+        if let data = defaults.data(forKey: hostsKey),
+           let hosts = try? JSONDecoder().decode([SSHConnectionConfig].self, from: data) {
+            return hosts
+        }
+        // Migrate a legacy single-host config into the array.
+        if let data = defaults.data(forKey: configKey),
+           let legacy = try? JSONDecoder().decode(SSHConnectionConfig.self, from: data) {
+            saveHosts([legacy])
+            activeHostID = legacy.id
+            defaults.removeObject(forKey: configKey)
+            return [legacy]
+        }
+        return []
     }
 
-    func saveConfig(_ config: SSHConnectionConfig) {
-        if let data = try? JSONEncoder().encode(config) {
-            defaults.set(data, forKey: configKey)
+    func saveHosts(_ hosts: [SSHConnectionConfig]) {
+        if let data = try? JSONEncoder().encode(hosts) {
+            defaults.set(data, forKey: hostsKey)
         }
+    }
+
+    var activeHostID: UUID? {
+        get { defaults.string(forKey: activeHostKey).flatMap(UUID.init) }
+        nonmutating set { defaults.set(newValue?.uuidString, forKey: activeHostKey) }
+    }
+
+    /// The active host, or the first host, or an empty placeholder.
+    func activeConfig() -> SSHConnectionConfig {
+        let hosts = loadHosts()
+        if let id = activeHostID, let host = hosts.first(where: { $0.id == id }) {
+            return host
+        }
+        return hosts.first ?? SSHConnectionConfig()
+    }
+
+    /// Inserts or updates a host by id.
+    func upsertHost(_ config: SSHConnectionConfig) {
+        var hosts = loadHosts()
+        if let index = hosts.firstIndex(where: { $0.id == config.id }) {
+            hosts[index] = config
+        } else {
+            hosts.append(config)
+        }
+        saveHosts(hosts)
+        if activeHostID == nil { activeHostID = config.id }
+    }
+
+    func deleteHost(_ id: UUID) {
+        var hosts = loadHosts()
+        hosts.removeAll { $0.id == id }
+        saveHosts(hosts)
+        try? KeychainStore.remove("secret-\(id.uuidString)")
+        if activeHostID == id { activeHostID = hosts.first?.id }
     }
 
     // MARK: Poll interval

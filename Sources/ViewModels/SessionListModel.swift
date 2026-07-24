@@ -37,24 +37,58 @@ final class SessionListModel {
     /// Last pane hash the user has actually seen, per session name.
     private var lastSeenHash: [String: Int] = [:]
 
+    /// All saved hosts (for the host switcher).
+    var hosts: [SSHConnectionConfig] = []
+
     init() {
         #if DEBUG
         TestSeed.applyIfRequested()
         #endif
-        self.config = store.loadConfig()
+        self.config = store.activeConfig()
         self.pollInterval = store.pollInterval
+        self.hosts = store.loadHosts()
     }
 
     var isConfigured: Bool {
         config.isComplete && store.hasStoredSecret(for: config)
     }
 
-    // MARK: Config
+    // MARK: Config / hosts
 
     func reloadConfig() {
-        config = store.loadConfig()
+        hosts = store.loadHosts()
+        config = store.activeConfig()
         pollInterval = store.pollInterval
         restartNotifications()
+    }
+
+    /// Switches the active host and refreshes immediately.
+    func selectHost(_ id: UUID) {
+        store.activeHostID = id
+        reloadConfig()
+        sessions = []
+        lastSeenHash = [:]
+        Task { await refresh() }
+    }
+
+    /// Adds or updates a host; optionally stores a new secret and makes it active.
+    func saveHost(_ config: SSHConnectionConfig, secret: String?, makeActive: Bool) {
+        store.upsertHost(config)
+        if let secret, !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            try? store.saveSecret(secret, for: config)
+        }
+        if makeActive { store.activeHostID = config.id }
+        reloadConfig()
+        if makeActive { Task { await refresh() } }
+    }
+
+    func deleteHost(_ id: UUID) {
+        store.deleteHost(id)
+        reloadConfig()
+    }
+
+    func hasSecret(for config: SSHConnectionConfig) -> Bool {
+        store.hasStoredSecret(for: config)
     }
 
     // MARK: Notifications
