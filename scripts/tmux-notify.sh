@@ -22,6 +22,7 @@ set -u
 BACKEND="${NOTIFY_BACKEND:-}"
 BRRR_API_URL="${BRRR_API_URL:-}"
 BRRR_KEYCHAIN_SERVICE="${BRRR_KEYCHAIN_SERVICE:-remotessh-brrr-webhook-secret}"
+BRRR_ICON_URL="${BRRR_ICON_URL:-}"   # optional public HTTPS image shown in the notification
 NTFY_SERVER="${NTFY_SERVER:-https://ntfy.sh}"
 NTFY_TOPIC="${NTFY_TOPIC:-}"
 SILENCE_SECS="${SILENCE_SECS:-20}"
@@ -53,19 +54,37 @@ load_brrr_secret() {
 }
 
 notify_brrr() {
-  local session="$1" body="$2" secret
+  local session="$1" body="$2" secret payload
   secret="$(load_brrr_secret)"
   if [ -z "$secret" ]; then
     echo "Brrr secret missing (env BRRR_WEBHOOK_SECRET or Keychain service '$BRRR_KEYCHAIN_SERVICE')." >&2
     return 1
   fi
-  # Brrr uses the first line as the notification title, the rest as the body.
-  printf '%s needs attention\n%s' "$session" "${body:-Session is waiting}" | \
-    /usr/bin/curl --fail --silent --show-error --max-time 15 \
-      -X POST "$BRRR_API_URL" \
-      -H "Authorization: Bearer $secret" \
-      -H "Content-Type: text/plain; charset=utf-8" \
-      --data-binary @- >/dev/null 2>&1
+  # Build a JSON payload: title/message, a tap deep-link into RemoteSSH
+  # (remotessh://open/<session>), an optional notification image, and a
+  # time-sensitive interruption level so it breaks through Focus.
+  payload="$(
+    SESSION="$session" BODY="${body:-Session is waiting}" IMAGE_URL="$BRRR_ICON_URL" \
+    /usr/bin/python3 -c '
+import json, os, urllib.parse
+s = os.environ["SESSION"]
+d = {
+    "title": s + " needs attention",
+    "message": os.environ["BODY"],
+    "open_url": "remotessh://open/" + urllib.parse.quote(s, safe=""),
+    "interruption_level": "time-sensitive",
+    "thread_id": "remotessh-" + s,
+}
+iu = os.environ.get("IMAGE_URL") or ""
+if iu:
+    d["image_url"] = iu
+print(json.dumps(d))'
+  )"
+  /usr/bin/curl --fail --silent --show-error --max-time 15 \
+    -X POST "$BRRR_API_URL" \
+    -H "Authorization: Bearer $secret" \
+    -H "Content-Type: application/json" \
+    --data-binary "$payload" >/dev/null 2>&1
 }
 
 notify_ntfy() {

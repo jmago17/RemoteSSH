@@ -22,13 +22,33 @@ background delivery. No server to run, no APNs certificate.
 
 ## 1. Create a Brrr webhook
 
-In the Brrr app → add a webhook (a.k.a. "incoming" notification). It gives you:
+In the Brrr app → add a webhook. Brrr gives you a **secret**; requests go to
+`https://api.brrr.now/v1/send` with `Authorization: Bearer <secret>` (or the
+secret-in-URL form `https://api.brrr.now/v1/<secret>`). Set `BRRR_API_URL` to
+whichever your webhook uses.
 
-- a **webhook URL** (e.g. `https://brrr.simonbs.dev/…`)
-- a **secret** (sent as `Authorization: Bearer <secret>`)
+The watcher sends a JSON payload (Brrr API fields):
 
-Optionally set the webhook's title/appearance in the app; the watcher sends the
-body as plain text with the session name on the first line.
+| Field | What we send |
+|-------|--------------|
+| `title` | `<session> needs attention` |
+| `message` | last non-empty pane line |
+| `open_url` | `remotessh://open/<session>` — **taps deep-link into RemoteSSH** |
+| `image_url` | `$BRRR_ICON_URL` (optional notification image) |
+| `interruption_level` | `time-sensitive` (breaks through Focus) |
+| `thread_id` | `remotessh-<session>` (groups per session) |
+
+### Notification icon (`image_url`)
+
+Brrr shows `image_url` (a public HTTPS image) in the notification. A ready-made
+RemoteSSH icon is committed at [`assets/notification-icon.png`](../assets/notification-icon.png).
+Host it on any public URL and set `BRRR_ICON_URL` in the plist. Easy options:
+
+- **GitHub**: push the repo, use the raw URL
+  `https://raw.githubusercontent.com/<you>/RemoteSSH/main/assets/notification-icon.png`.
+- **Cloudflare** R2 (public bucket) or Pages — upload the PNG, use its URL.
+
+Leave `BRRR_ICON_URL` empty to send notifications without an image.
 
 ## 2. Store the secret in the Keychain (not in any file)
 
@@ -70,12 +90,18 @@ Fire a one-off notification to confirm the webhook + secret work:
 
 ```sh
 SECRET=$(security find-generic-password -a "$USER" -s remotessh-brrr-webhook-secret -w)
-printf 'test needs attention\nhello from RemoteSSH' | \
-  curl -fsS -X POST "$BRRR_API_URL" \
-    -H "Authorization: Bearer $SECRET" \
-    -H "Content-Type: text/plain; charset=utf-8" \
-    --data-binary @-
+curl -fsS -X POST "$BRRR_API_URL" \
+  -H "Authorization: Bearer $SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "demo needs attention",
+    "message": "hello from RemoteSSH",
+    "open_url": "remotessh://open/demo",
+    "interruption_level": "time-sensitive"
+  }'
 ```
+
+Tapping that notification should open RemoteSSH straight into the `demo` session.
 
 Then, to test the watcher end-to-end: run a command in a tmux session, let it go
 quiet for `SILENCE_SECS`, and you should get a push.
