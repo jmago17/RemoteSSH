@@ -25,13 +25,28 @@ No notifications yet — see the roadmap below.
 
 ## Roadmap
 
-| Phase | Scope |
-|------|-------|
-| 1 ✅ | SwiftUI list + Citadel exec, read-only scrollback, create/kill/rename, foreground polling |
-| 2 ✅ | SwiftTerm interactive `tmux attach` (typing works) + Peek/Attach toggle, PTY resize |
-| 3 | Local notifications via `BGAppRefreshTask` polling |
-| 4 | ntfy.sh bridge for near-real-time push + Mac-side LaunchAgent watcher |
-| 5 | Multi-host support, Keychain key-management UI, host-key pinning, reconnect-on-foreground, theming |
+| Phase | Scope | Status |
+|------|-------|--------|
+| 1 | SwiftUI list + Citadel exec, create/kill/rename, foreground polling | ✅ |
+| 2 | SwiftTerm interactive `tmux attach` (typing), PTY resize, on-screen keys | ✅ |
+| — | Reconnect on drop + auto-reconnect on foreground | ✅ |
+| — | tmux-resurrect **Restore** | ✅ |
+| 4 | **Notifications**: ntfy.sh bridge + Mac LaunchAgent watcher (`scripts/tmux-notify.sh`); in-app foreground subscription + deep-links | ✅ |
+| 5 | Host-key TOFU pinning | ✅ |
+| 5 | In-app ed25519 key generation | ✅ |
+| 5 | App icon (Icon Composer), device signing | ✅ |
+| 5 | **Multi-host** support (schema ready via config UUID) | ⬜ next |
+| 5 | Terminal font-size control, copy/paste polish | ⬜ |
+| — | APNs-backed background notifications (v1 uses ntfy app for background) | ⬜ |
+
+### Notifications setup (Mac side)
+
+1. Pick a hard-to-guess ntfy topic (anyone with it can notify you).
+2. Edit `scripts/com.danobat.remotessh.notify.plist` (script path + `NTFY_TOPIC`),
+   copy to `~/Library/LaunchAgents/`, then `launchctl load` it.
+3. In the app: Settings → Notifications → enable, set the same topic.
+4. For **background** pushes (app closed), also subscribe to the topic in the
+   [ntfy iOS app] — its APNs delivery works when RemoteSSH is suspended.
 
 ## Confirmed decisions
 
