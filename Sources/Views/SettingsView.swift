@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Connection + credential + poll-interval settings. Single-host for now;
 /// multi-host management arrives in a later phase.
@@ -15,6 +16,7 @@ struct SettingsView: View {
     @State private var notificationsEnabled = false
     @State private var ntfyServer = "https://ntfy.sh"
     @State private var ntfyTopic = ""
+    @State private var generatedPublicKey: String?
 
     private let store = SettingsStore()
 
@@ -63,18 +65,36 @@ struct SettingsView: View {
                         SecureField(secretPlaceholder, text: $secret)
                     case .privateKey:
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Paste ed25519 private key")
+                            Text("Paste an ed25519 private key, or generate one.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             TextEditor(text: $secret)
                                 .font(.system(.footnote, design: .monospaced))
-                                .frame(minHeight: 120)
+                                .frame(minHeight: 100)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
                             if secret.isEmpty && hasExistingSecret {
                                 Text("A key is already stored. Leave blank to keep it.")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
+                            }
+                        }
+                        Button("Generate New Key") { generateKey() }
+
+                        if let publicKey = generatedPublicKey {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Add this public key to ~/.ssh/authorized_keys on your Mac:")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(publicKey)
+                                    .font(.system(.caption2, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .lineLimit(3)
+                                Button {
+                                    UIPasteboard.general.string = publicKey
+                                } label: {
+                                    Label("Copy Public Key", systemImage: "doc.on.doc")
+                                }
                             }
                         }
                     }
@@ -141,6 +161,13 @@ struct SettingsView: View {
 
     private var secretPlaceholder: String {
         hasExistingSecret ? "•••••••• (stored — leave blank to keep)" : "Password"
+    }
+
+    private func generateKey() {
+        let generated = KeyGenerator.generate()
+        secret = generated.privateSecret
+        generatedPublicKey = generated.publicKeyLine
+        draft.authKind = .privateKey
     }
 
     private func save() {
