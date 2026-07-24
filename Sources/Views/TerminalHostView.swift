@@ -5,10 +5,12 @@ import SwiftTerm
 /// host output feeds the emulator, keystrokes/resizes flow back out over SSH.
 struct TerminalHostView: UIViewRepresentable {
     let session: TerminalSession
+    var fontSize: CGFloat = 13
 
     func makeUIView(context: Context) -> TerminalView {
         let terminalView = TerminalView(frame: .zero)
         terminalView.terminalDelegate = context.coordinator
+        terminalView.font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         context.coordinator.terminalView = terminalView
 
         // Feed host output into the emulator (called on the main actor).
@@ -29,6 +31,10 @@ struct TerminalHostView: UIViewRepresentable {
         if !context.coordinator.didFocus {
             context.coordinator.didFocus = true
             DispatchQueue.main.async { _ = uiView.becomeFirstResponder() }
+        }
+        // Apply font-size changes (reflows the PTY via sizeChanged).
+        if abs(uiView.font.pointSize - fontSize) > 0.1 {
+            uiView.font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         }
     }
 

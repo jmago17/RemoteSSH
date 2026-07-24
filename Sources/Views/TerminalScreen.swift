@@ -9,6 +9,7 @@ struct TerminalScreen: View {
     @State private var terminal: TerminalSession?
     @State private var setupError: String?
     @State private var generation = 0
+    @AppStorage("terminalFontSize") private var fontSize: Double = 13
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -17,7 +18,7 @@ struct TerminalScreen: View {
 
             if let terminal {
                 // A new id on reconnect forces a fresh SwiftTerm view + attach.
-                TerminalHostView(session: terminal).id(generation)
+                TerminalHostView(session: terminal, fontSize: CGFloat(fontSize)).id(generation)
                 statusOverlay(terminal)
             } else if let setupError {
                 ContentUnavailableView {
@@ -47,6 +48,13 @@ struct TerminalScreen: View {
                     Button("Ctrl-C") { terminal?.sendKey(.ctrlC) }
                     Divider()
                     Button("Detach (⌃b d)") { terminal?.sendKey(.detach) }
+                    Divider()
+                    Button {
+                        fontSize = min(fontSize + 1, 28)
+                    } label: { Label("Bigger Text", systemImage: "textformat.size.larger") }
+                    Button {
+                        fontSize = max(fontSize - 1, 8)
+                    } label: { Label("Smaller Text", systemImage: "textformat.size.smaller") }
                 } label: {
                     Image(systemName: "keyboard")
                 }

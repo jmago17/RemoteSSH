@@ -41,9 +41,6 @@ final class SessionListModel {
     var hosts: [SSHConnectionConfig] = []
 
     init() {
-        #if DEBUG
-        TestSeed.applyIfRequested()
-        #endif
         self.config = store.activeConfig()
         self.pollInterval = store.pollInterval
         self.hosts = store.loadHosts()

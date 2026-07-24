@@ -9,24 +9,7 @@ struct SessionListView: View {
     @State private var showingNewSession = false
     @State private var newSessionName = ""
 
-    @State private var path: [TmuxSession]
-
-    init(model: SessionListModel) {
-        self.model = model
-        #if DEBUG
-        // Deep-link straight into a session's terminal for testing: launch with
-        // `--seed-test-config` and env REMOTESSH_OPEN=<name>.
-        if let name = ProcessInfo.processInfo.environment["REMOTESSH_OPEN"] {
-            _path = State(initialValue: [TmuxSession(name: name, isAttached: false,
-                                                     created: .now, lastActivity: .now,
-                                                     preview: "", contentHash: 0)])
-        } else {
-            _path = State(initialValue: [])
-        }
-        #else
-        _path = State(initialValue: [])
-        #endif
-    }
+    @State private var path: [TmuxSession] = []
 
     var body: some View {
         NavigationStack(path: $path) {
