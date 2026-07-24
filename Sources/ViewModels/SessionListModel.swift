@@ -22,6 +22,9 @@ final class SessionListModel {
     private var lastSeenHash: [String: Int] = [:]
 
     init() {
+        #if DEBUG
+        TestSeed.applyIfRequested()
+        #endif
         self.config = store.loadConfig()
         self.pollInterval = store.pollInterval
     }

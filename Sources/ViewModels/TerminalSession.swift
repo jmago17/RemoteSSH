@@ -79,6 +79,28 @@ final class TerminalSession {
         resizeCont.yield(size)
     }
 
+    /// Sends a well-known control sequence (for on-screen special keys that the
+    /// soft keyboard can't easily produce).
+    nonisolated func sendKey(_ key: SpecialKey) {
+        sendUserInput(key.bytes)
+    }
+
+    enum SpecialKey {
+        case shiftTab   // CSI Z — back-tab (e.g. Claude Code "shift+tab to cycle")
+        case escape
+        case tab
+        case ctrlC
+
+        var bytes: [UInt8] {
+            switch self {
+            case .shiftTab: return [0x1b, 0x5b, 0x5a]   // ESC [ Z
+            case .escape:   return [0x1b]
+            case .tab:      return [0x09]
+            case .ctrlC:    return [0x03]
+            }
+        }
+    }
+
     func stop() {
         runTask?.cancel()
         runTask = nil

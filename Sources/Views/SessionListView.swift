@@ -9,8 +9,27 @@ struct SessionListView: View {
     @State private var showingNewSession = false
     @State private var newSessionName = ""
 
+    @State private var path: [TmuxSession]
+
+    init(model: SessionListModel) {
+        self.model = model
+        #if DEBUG
+        // Deep-link straight into a session's terminal for testing: launch with
+        // `--seed-test-config` and env REMOTESSH_OPEN=<name>.
+        if let name = ProcessInfo.processInfo.environment["REMOTESSH_OPEN"] {
+            _path = State(initialValue: [TmuxSession(name: name, isAttached: false,
+                                                     created: .now, lastActivity: .now,
+                                                     preview: "", contentHash: 0)])
+        } else {
+            _path = State(initialValue: [])
+        }
+        #else
+        _path = State(initialValue: [])
+        #endif
+    }
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if !model.isConfigured {
                     unconfiguredState
@@ -19,6 +38,9 @@ struct SessionListView: View {
                 } else {
                     sessionList
                 }
+            }
+            .navigationDestination(for: TmuxSession.self) { session in
+                TerminalScreen(session: session, model: model)
             }
             .navigationTitle("Sessions")
             .toolbar {
@@ -92,9 +114,7 @@ struct SessionListView: View {
                 }
             }
             ForEach(model.sessions) { session in
-                NavigationLink {
-                    SessionThreadView(session: session, model: model)
-                } label: {
+                NavigationLink(value: session) {
                     SessionRowView(session: session)
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -117,13 +137,25 @@ struct SessionListView: View {
         .refreshable { await model.refresh() }
     }
 
+    @ViewBuilder
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label("No Sessions", systemImage: "bubble.left.and.bubble.right")
-        } description: {
-            Text("No tmux sessions are running on \(model.config.host).")
-        } actions: {
-            Button("Refresh") { Task { await model.refresh() } }
+        if let error = model.errorMessage {
+            ContentUnavailableView {
+                Label("Connection Problem", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(error)
+            } actions: {
+                Button("Retry") { Task { await model.refresh() } }
+                Button("Settings") { showingSettings = true }
+            }
+        } else {
+            ContentUnavailableView {
+                Label("No Sessions", systemImage: "bubble.left.and.bubble.right")
+            } description: {
+                Text("No tmux sessions are running on \(model.config.host).")
+            } actions: {
+                Button("Refresh") { Task { await model.refresh() } }
+            }
         }
     }
 

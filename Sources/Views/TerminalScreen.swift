@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// Interactive "attach" mode: a full SwiftTerm terminal bound to
+/// A session's "thread": a full interactive SwiftTerm terminal bound to
 /// `tmux attach -t <name>` over a live SSH PTY.
 struct TerminalScreen: View {
     let session: TmuxSession
-    let config: SSHConnectionConfig
+    @Bindable var model: SessionListModel
 
     @State private var terminal: TerminalSession?
     @State private var setupError: String?
@@ -26,7 +26,32 @@ struct TerminalScreen: View {
                 ProgressView()
             }
         }
-        .onAppear(perform: setup)
+        .navigationTitle(session.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    terminal?.sendKey(.shiftTab)
+                } label: {
+                    Text("⇧⇥").font(.body.monospaced())
+                }
+                .accessibilityLabel("Send Shift-Tab")
+                .disabled(terminal == nil)
+
+                Menu {
+                    Button("Esc") { terminal?.sendKey(.escape) }
+                    Button("Tab") { terminal?.sendKey(.tab) }
+                    Button("Ctrl-C") { terminal?.sendKey(.ctrlC) }
+                } label: {
+                    Image(systemName: "keyboard")
+                }
+                .disabled(terminal == nil)
+            }
+        }
+        .onAppear {
+            model.markRead(session.name)
+            setup()
+        }
         .onDisappear { terminal?.stop() }
     }
 
@@ -59,11 +84,13 @@ struct TerminalScreen: View {
 
     private func setup() {
         guard terminal == nil, setupError == nil else { return }
-        guard let credential = SettingsStore().loadCredential(for: config) else {
+        guard let credential = SettingsStore().loadCredential(for: model.config) else {
             setupError = "No stored credential."
             return
         }
-        let command = "exec tmux attach -t \(TmuxService.quote(session.name))"
-        terminal = TerminalSession(config: config, credential: credential, startupCommand: command)
+        // `env` injects Homebrew onto PATH; `exec` replaces the shell so a
+        // clean tmux detach closes the channel.
+        let command = "exec env \(TmuxService.pathPrefix) tmux attach -t \(TmuxService.quote(session.name))"
+        terminal = TerminalSession(config: model.config, credential: credential, startupCommand: command)
     }
 }

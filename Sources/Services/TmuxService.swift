@@ -9,6 +9,11 @@ struct TmuxService {
     /// Fields, pipe-separated: name | attached | created | activity
     static let listFormat = "#S|#{session_attached}|#{session_created}|#{session_activity}"
 
+    /// Non-interactive SSH exec channels get a minimal PATH
+    /// (`/usr/bin:/bin:/usr/sbin:/sbin`), which omits Homebrew. Prefix every
+    /// command so `tmux` resolves on both Apple-Silicon and Intel installs.
+    static let pathPrefix = #"PATH="$PATH:/opt/homebrew/bin:/usr/local/bin""#
+
     /// Fetches every session plus a short pane preview for each, over a single
     /// SSH connection.
     func fetchSessions(config: SSHConnectionConfig, credential: SSHCredential) async throws -> [TmuxSession] {
@@ -16,7 +21,7 @@ struct TmuxService {
             // `|| true` keeps the exit code zero when tmux has no server
             // running, so we surface "no sessions" rather than an error.
             let raw = try await shell.run(
-                "tmux list-sessions -F '\(Self.listFormat)' 2>/dev/null || true"
+                "\(Self.pathPrefix) tmux list-sessions -F '\(Self.listFormat)' 2>/dev/null || true"
             )
 
             var sessions: [TmuxSession] = []
@@ -30,7 +35,7 @@ struct TmuxService {
                 let activity = Date(timeIntervalSince1970: Double(parts[3]) ?? 0)
 
                 let pane = (try? await shell.run(
-                    "tmux capture-pane -p -t \(Self.quote(name)) -S -3 2>/dev/null || true"
+                    "\(Self.pathPrefix) tmux capture-pane -p -t \(Self.quote(name)) -S -3 2>/dev/null || true"
                 )) ?? ""
 
                 sessions.append(
@@ -58,21 +63,21 @@ struct TmuxService {
     ) async throws -> String {
         try await withShell(config: config, credential: credential) { shell in
             try await shell.run(
-                "tmux capture-pane -p -t \(Self.quote(name)) -S -\(lines) 2>/dev/null || true"
+                "\(Self.pathPrefix) tmux capture-pane -p -t \(Self.quote(name)) -S -\(lines) 2>/dev/null || true"
             )
         }
     }
 
     func killSession(_ name: String, config: SSHConnectionConfig, credential: SSHCredential) async throws {
         try await withShell(config: config, credential: credential) { shell in
-            _ = try await shell.run("tmux kill-session -t \(Self.quote(name)) 2>/dev/null || true")
+            _ = try await shell.run("\(Self.pathPrefix) tmux kill-session -t \(Self.quote(name)) 2>/dev/null || true")
         }
     }
 
     func renameSession(_ name: String, to newName: String, config: SSHConnectionConfig, credential: SSHCredential) async throws {
         try await withShell(config: config, credential: credential) { shell in
             _ = try await shell.run(
-                "tmux rename-session -t \(Self.quote(name)) \(Self.quote(newName)) 2>/dev/null || true"
+                "\(Self.pathPrefix) tmux rename-session -t \(Self.quote(name)) \(Self.quote(newName)) 2>/dev/null || true"
             )
         }
     }
@@ -81,7 +86,7 @@ struct TmuxService {
     /// none is running, so this works from a cold machine too.
     func createSession(_ name: String, config: SSHConnectionConfig, credential: SSHCredential) async throws {
         try await withShell(config: config, credential: credential) { shell in
-            _ = try await shell.run("tmux new-session -d -s \(Self.quote(name)) 2>/dev/null || true")
+            _ = try await shell.run("\(Self.pathPrefix) tmux new-session -d -s \(Self.quote(name)) 2>/dev/null || true")
         }
     }
 
