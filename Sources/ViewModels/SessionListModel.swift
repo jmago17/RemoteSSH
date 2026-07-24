@@ -1,0 +1,145 @@
+import Foundation
+import Observation
+
+/// Drives the session list: foreground polling, unread detection, and the
+/// mutating actions (kill / rename). Runs on the main actor so the views can
+/// read its state directly.
+@MainActor
+@Observable
+final class SessionListModel {
+    var sessions: [TmuxSession] = []
+    var isRefreshing = false
+    var errorMessage: String?
+
+    var config: SSHConnectionConfig
+    var pollInterval: TimeInterval
+
+    private let store = SettingsStore()
+    private let tmux = TmuxService()
+    private var pollTask: Task<Void, Never>?
+
+    /// Last pane hash the user has actually seen, per session name.
+    private var lastSeenHash: [String: Int] = [:]
+
+    init() {
+        self.config = store.loadConfig()
+        self.pollInterval = store.pollInterval
+    }
+
+    var isConfigured: Bool {
+        config.isComplete && store.hasStoredSecret(for: config)
+    }
+
+    // MARK: Config
+
+    func reloadConfig() {
+        config = store.loadConfig()
+        pollInterval = store.pollInterval
+    }
+
+    // MARK: Polling lifecycle
+
+    func startPolling() {
+        guard pollTask == nil else { return }
+        pollTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                await self.refresh()
+                let interval = self.pollInterval
+                try? await Task.sleep(for: .seconds(interval))
+            }
+        }
+    }
+
+    func stopPolling() {
+        pollTask?.cancel()
+        pollTask = nil
+    }
+
+    // MARK: Refresh
+
+    func refresh() async {
+        guard isConfigured else {
+            errorMessage = nil
+            sessions = []
+            return
+        }
+        guard let credential = store.loadCredential(for: config) else {
+            errorMessage = "No stored credential for this connection."
+            return
+        }
+
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        do {
+            let fetched = try await tmux.fetchSessions(config: config, credential: credential)
+            sessions = applyUnread(to: fetched)
+            errorMessage = nil
+        } catch {
+            errorMessage = friendly(error)
+        }
+    }
+
+    /// Marks a session read (call when the user opens its thread).
+    func markRead(_ name: String) {
+        if let session = sessions.first(where: { $0.name == name }) {
+            lastSeenHash[name] = session.contentHash
+        }
+        if let idx = sessions.firstIndex(where: { $0.name == name }) {
+            sessions[idx].hasUnread = false
+        }
+    }
+
+    // MARK: Actions
+
+    func kill(_ name: String) async {
+        await mutate { tmux, config, credential in
+            try await tmux.killSession(name, config: config, credential: credential)
+        }
+    }
+
+    func rename(_ name: String, to newName: String) async {
+        await mutate { tmux, config, credential in
+            try await tmux.renameSession(name, to: newName, config: config, credential: credential)
+        }
+    }
+
+    func createSession(_ name: String) async {
+        await mutate { tmux, config, credential in
+            try await tmux.createSession(name, config: config, credential: credential)
+        }
+    }
+
+    private func mutate(
+        _ body: (TmuxService, SSHConnectionConfig, SSHCredential) async throws -> Void
+    ) async {
+        guard let credential = store.loadCredential(for: config) else { return }
+        do {
+            try await body(tmux, config, credential)
+            await refresh()
+        } catch {
+            errorMessage = friendly(error)
+        }
+    }
+
+    // MARK: Helpers
+
+    private func applyUnread(to fetched: [TmuxSession]) -> [TmuxSession] {
+        fetched.map { session in
+            var s = session
+            if let seen = lastSeenHash[s.name] {
+                s.hasUnread = seen != s.contentHash
+            } else {
+                // First time we see this session — baseline it, no unread dot.
+                lastSeenHash[s.name] = s.contentHash
+                s.hasUnread = false
+            }
+            return s
+        }
+    }
+
+    private func friendly(_ error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+}
