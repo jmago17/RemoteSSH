@@ -89,6 +89,7 @@ final class TerminalSession {
         case escape
         case tab
         case ctrlC
+        case detach     // tmux prefix (Ctrl-b) then d
 
         var bytes: [UInt8] {
             switch self {
@@ -96,6 +97,7 @@ final class TerminalSession {
             case .escape:   return [0x1b]
             case .tab:      return [0x09]
             case .ctrlC:    return [0x03]
+            case .detach:   return [0x02, 0x64]         // C-b d
             }
         }
     }

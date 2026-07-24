@@ -44,6 +44,11 @@ struct SettingsView: View {
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
                     }
+                    if HostKeyStore.hasTrustedKey(host: draft.host, port: draft.port) {
+                        Button("Reset Trusted Host Key", role: .destructive) {
+                            HostKeyStore.resetTrust(host: draft.host, port: draft.port)
+                        }
+                    }
                 }
 
                 Section("Authentication") {

@@ -14,7 +14,7 @@ enum SSHConnector {
             host: config.host,
             port: config.port,
             authenticationMethod: try authenticationMethod(config: config, credential: credential),
-            hostKeyValidator: .acceptAnything(), // TODO(phase5): pin/trust host keys
+            hostKeyValidator: .custom(TOFUHostKeyValidator(host: config.host, port: config.port)),
             reconnect: .never
         )
     }

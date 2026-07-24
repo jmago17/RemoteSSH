@@ -45,6 +45,8 @@ struct TerminalScreen: View {
                     Button("Esc") { terminal?.sendKey(.escape) }
                     Button("Tab") { terminal?.sendKey(.tab) }
                     Button("Ctrl-C") { terminal?.sendKey(.ctrlC) }
+                    Divider()
+                    Button("Detach (⌃b d)") { terminal?.sendKey(.detach) }
                 } label: {
                     Image(systemName: "keyboard")
                 }
