@@ -1,8 +1,6 @@
 import Foundation
 import Citadel
 import NIOCore
-import NIOSSH
-import Crypto
 
 /// Owns a short-lived SSH connection and runs one-shot `exec` commands over it.
 /// The polling model opens a connection, runs a batch of tmux commands, then
@@ -25,13 +23,7 @@ final class RemoteShell {
 
     func connect() async throws {
         guard client == nil else { return }
-        client = try await SSHClient.connect(
-            host: config.host,
-            port: config.port,
-            authenticationMethod: try authenticationMethod(),
-            hostKeyValidator: .acceptAnything(), // TODO(phase5): pin/trust host keys
-            reconnect: .never
-        )
+        client = try await SSHConnector.connect(config: config, credential: credential)
     }
 
     /// Runs a command and returns its stdout as UTF-8 text.
@@ -45,19 +37,6 @@ final class RemoteShell {
     func disconnect() async {
         try? await client?.close()
         client = nil
-    }
-
-    // MARK: Auth
-
-    private func authenticationMethod() throws -> SSHAuthenticationMethod {
-        switch credential {
-        case .password(let password):
-            return .passwordBased(username: config.username, password: password)
-
-        case .privateKey(let openSSHText):
-            let key = try Curve25519.Signing.PrivateKey(sshEd25519: openSSHText)
-            return .ed25519(username: config.username, privateKey: key)
-        }
     }
 
     enum RemoteShellError: LocalizedError {

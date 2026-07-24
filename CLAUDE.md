@@ -39,7 +39,17 @@ as a target — trust a clean `xcodebuild` over those.
 - SwiftUI: MV pattern — `@Observable` model injected into views; no view models
   per screen beyond `SessionListModel`.
 
+## Terminal (Phase 2)
+
+Interactive attach uses Citadel's `client.withPTY(request) { inbound, outbound in ... }`
+(requests a PTY, then a shell; we `exec tmux attach -t <name>` into it). The
+non-Sendable PTY writer/`SSHClient` stay inside the nonisolated
+`SSHTerminalRunner`; the `@MainActor` `TerminalSession` communicates only via
+`AsyncStream`s and a `@Sendable` output callback. SwiftTerm's `TerminalViewDelegate`
+fires on nonisolated methods, so `TerminalSession.sendUserInput`/`resize` are
+`nonisolated` (they only touch Sendable stream continuations).
+
 ## Roadmap
 
-Phase 1 (MVP) is done. Next: Phase 2 = SwiftTerm interactive attach. See
-`README.md` for the full phase table.
+Phases 1–2 done. Next: Phase 3 = local notifications via `BGAppRefreshTask`.
+See `README.md` for the full phase table.

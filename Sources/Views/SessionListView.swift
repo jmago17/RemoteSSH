@@ -93,7 +93,7 @@ struct SessionListView: View {
             }
             ForEach(model.sessions) { session in
                 NavigationLink {
-                    ScrollbackView(session: session, model: model)
+                    SessionThreadView(session: session, model: model)
                 } label: {
                     SessionRowView(session: session)
                 }

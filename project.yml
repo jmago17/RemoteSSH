@@ -17,6 +17,9 @@ packages:
   Citadel:
     url: https://github.com/orlandos-nl/Citadel.git
     minorVersion: 0.12.1
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm.git
+    minorVersion: 1.15.0
 
 targets:
   RemoteSSH:
@@ -39,3 +42,4 @@ targets:
         SWIFT_EMIT_LOC_STRINGS: "YES"
     dependencies:
       - package: Citadel
+      - package: SwiftTerm

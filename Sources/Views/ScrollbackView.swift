@@ -31,8 +31,6 @@ struct ScrollbackView: View {
             }
         }
         .background(Color(.systemBackground))
-        .navigationTitle(session.name)
-        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
