@@ -35,9 +35,10 @@ No notifications yet — see the roadmap below.
 | 5 | Host-key TOFU pinning | ✅ |
 | 5 | In-app ed25519 key generation | ✅ |
 | 5 | App icon (Icon Composer), device signing | ✅ |
-| 5 | **Multi-host** support (schema ready via config UUID) | ⬜ next |
-| 5 | Terminal font-size control, copy/paste polish | ⬜ |
+| 5 | **Multi-host** support (add/edit/delete/switch hosts) | ✅ |
+| 5 | Terminal font-size control | ✅ |
 | — | APNs-backed background notifications (v1 uses ntfy app for background) | ⬜ |
+| — | Copy/paste selection polish, scrollback search | ⬜ |
 
 ### Notifications setup (Mac side)
 
