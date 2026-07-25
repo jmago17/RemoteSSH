@@ -2,8 +2,9 @@ import Foundation
 import Security
 
 /// Minimal wrapper over the iOS Keychain for storing sensitive strings
-/// (passwords / private-key text). Values are stored as generic passwords
-/// scoped to this app, accessible only after first unlock.
+/// (passwords / private-key text). Items are marked **synchronizable** so they
+/// sync across the user's devices via iCloud Keychain (end-to-end encrypted),
+/// which is why hosts saved on one device work on another.
 enum KeychainStore {
     private static let service = "com.danobat.RemoteSSH.credentials"
 
@@ -17,7 +18,9 @@ enum KeychainStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            // Must NOT be ...ThisDeviceOnly for iCloud Keychain sync to work.
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+            kSecAttrSynchronizable as String: kCFBooleanTrue as Any,
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
@@ -31,6 +34,8 @@ enum KeychainStore {
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
+            // Match both synced and any legacy device-only items.
+            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
         ]
 
         var item: CFTypeRef?
@@ -44,6 +49,7 @@ enum KeychainStore {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
         ]
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {

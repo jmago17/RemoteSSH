@@ -59,6 +59,27 @@ final class SessionListModel {
         restartNotifications()
     }
 
+    private var cloudObserver: (any NSObjectProtocol)?
+
+    /// Starts iCloud Key-Value sync: pulls the latest, and reloads whenever
+    /// another device changes settings.
+    func startCloudSync() {
+        NSUbiquitousKeyValueStore.default.synchronize()
+        guard cloudObserver == nil else { return }
+        cloudObserver = NotificationCenter.default.addObserver(
+            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+            object: NSUbiquitousKeyValueStore.default,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.store.mirrorFromCloud()
+                self.reloadConfig()
+                await self.refresh()
+            }
+        }
+    }
+
     /// Switches the active host and refreshes immediately.
     func selectHost(_ id: UUID) {
         store.activeHostID = id

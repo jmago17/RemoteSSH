@@ -9,6 +9,7 @@ DerivedData/
 ## XcodeGen generates these from project.yml — do not commit
 RemoteSSH.xcodeproj/
 RemoteSSH-Info.plist
+RemoteSSH.entitlements
 
 ## SPM
 .swiftpm/

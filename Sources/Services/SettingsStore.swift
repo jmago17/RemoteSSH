@@ -1,11 +1,14 @@
 import Foundation
 
-/// Persists the active connection config (UserDefaults) and its secret
-/// (Keychain). Keeping the secret out of UserDefaults is deliberate — see
-/// the plan's auth requirement that private material never touch disk
-/// unencrypted.
+/// Persists settings. Most settings (hosts, active host, poll interval,
+/// notification config) sync across devices via **iCloud Key-Value storage**,
+/// mirrored to UserDefaults for offline reads. Secrets live in the Keychain
+/// (synced via iCloud Keychain — see KeychainStore). Font size and host-key
+/// trust stay device-local.
 struct SettingsStore {
     private let defaults: UserDefaults
+    private let cloud = NSUbiquitousKeyValueStore.default
+
     private let configKey = "activeConnectionConfig"   // legacy single-host key
     private let hostsKey = "hosts"
     private let activeHostKey = "activeHostID"
@@ -14,18 +17,60 @@ struct SettingsStore {
     private let ntfyTopicKey = "ntfyTopic"
     private let notificationsEnabledKey = "notificationsEnabled"
 
+    /// Keys that sync via iCloud (used when mirroring external changes).
+    static let syncedKeys = ["hosts", "activeHostID", "pollIntervalSeconds",
+                             "ntfyServer", "ntfyTopic", "notificationsEnabled"]
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+    }
+
+    // MARK: Synced accessors (iCloud KVS, mirrored to UserDefaults)
+
+    private func syncedData(_ key: String) -> Data? {
+        cloud.data(forKey: key) ?? defaults.data(forKey: key)
+    }
+    private func setSynced(_ data: Data?, _ key: String) {
+        defaults.set(data, forKey: key)
+        if let data { cloud.set(data, forKey: key) } else { cloud.removeObject(forKey: key) }
+        cloud.synchronize()
+    }
+    private func syncedString(_ key: String) -> String? {
+        cloud.string(forKey: key) ?? defaults.string(forKey: key)
+    }
+    private func setSynced(_ string: String?, _ key: String) {
+        defaults.set(string, forKey: key)
+        if let string { cloud.set(string, forKey: key) } else { cloud.removeObject(forKey: key) }
+        cloud.synchronize()
+    }
+
+    /// Copies synced keys from iCloud into UserDefaults (call when iCloud reports
+    /// an external change, so offline reads stay current).
+    func mirrorFromCloud() {
+        for key in Self.syncedKeys {
+            if let value = cloud.object(forKey: key) {
+                defaults.set(value, forKey: key)
+            }
+        }
     }
 
     // MARK: Hosts
 
     func loadHosts() -> [SSHConnectionConfig] {
-        if let data = defaults.data(forKey: hostsKey),
+        if let data = cloud.data(forKey: hostsKey),
            let hosts = try? JSONDecoder().decode([SSHConnectionConfig].self, from: data) {
             return hosts
         }
-        // Migrate a legacy single-host config into the array.
+        // iCloud empty — seed it from local data (post-upgrade or legacy).
+        if let data = defaults.data(forKey: hostsKey),
+           let hosts = try? JSONDecoder().decode([SSHConnectionConfig].self, from: data) {
+            saveHosts(hosts)
+            if cloud.string(forKey: activeHostKey) == nil,
+               let local = defaults.string(forKey: activeHostKey) {
+                cloud.set(local, forKey: activeHostKey)
+            }
+            return hosts
+        }
         if let data = defaults.data(forKey: configKey),
            let legacy = try? JSONDecoder().decode(SSHConnectionConfig.self, from: data) {
             saveHosts([legacy])
@@ -37,14 +82,12 @@ struct SettingsStore {
     }
 
     func saveHosts(_ hosts: [SSHConnectionConfig]) {
-        if let data = try? JSONEncoder().encode(hosts) {
-            defaults.set(data, forKey: hostsKey)
-        }
+        setSynced(try? JSONEncoder().encode(hosts), hostsKey)
     }
 
     var activeHostID: UUID? {
-        get { defaults.string(forKey: activeHostKey).flatMap(UUID.init) }
-        nonmutating set { defaults.set(newValue?.uuidString, forKey: activeHostKey) }
+        get { syncedString(activeHostKey).flatMap(UUID.init) }
+        nonmutating set { setSynced(newValue?.uuidString, activeHostKey) }
     }
 
     /// The active host, or the first host, or an empty placeholder.
@@ -80,33 +123,47 @@ struct SettingsStore {
 
     var pollInterval: TimeInterval {
         get {
-            let v = defaults.double(forKey: pollKey)
+            let v = cloud.object(forKey: pollKey) != nil ? cloud.double(forKey: pollKey)
+                                                         : defaults.double(forKey: pollKey)
             return v > 0 ? v : 5
         }
-        nonmutating set { defaults.set(newValue, forKey: pollKey) }
+        nonmutating set {
+            defaults.set(newValue, forKey: pollKey)
+            cloud.set(newValue, forKey: pollKey)
+            cloud.synchronize()
+        }
     }
 
     // MARK: Notifications (ntfy)
 
     var ntfyServer: String {
         get {
-            let v = defaults.string(forKey: ntfyServerKey) ?? ""
+            let v = syncedString(ntfyServerKey) ?? ""
             return v.isEmpty ? "https://ntfy.sh" : v
         }
-        nonmutating set { defaults.set(newValue, forKey: ntfyServerKey) }
+        nonmutating set { setSynced(newValue, ntfyServerKey) }
     }
 
     var ntfyTopic: String {
-        get { defaults.string(forKey: ntfyTopicKey) ?? "" }
-        nonmutating set { defaults.set(newValue, forKey: ntfyTopicKey) }
+        get { syncedString(ntfyTopicKey) ?? "" }
+        nonmutating set { setSynced(newValue, ntfyTopicKey) }
     }
 
     var notificationsEnabled: Bool {
-        get { defaults.bool(forKey: notificationsEnabledKey) }
-        nonmutating set { defaults.set(newValue, forKey: notificationsEnabledKey) }
+        get {
+            if cloud.object(forKey: notificationsEnabledKey) != nil {
+                return cloud.bool(forKey: notificationsEnabledKey)
+            }
+            return defaults.bool(forKey: notificationsEnabledKey)
+        }
+        nonmutating set {
+            defaults.set(newValue, forKey: notificationsEnabledKey)
+            cloud.set(newValue, forKey: notificationsEnabledKey)
+            cloud.synchronize()
+        }
     }
 
-    // MARK: Secret (Keychain)
+    // MARK: Secret (Keychain, iCloud-synced)
 
     private func secretAccount(for config: SSHConnectionConfig) -> String {
         "secret-\(config.id.uuidString)"

@@ -39,6 +39,10 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: RemoteSSH
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_EMIT_LOC_STRINGS: "YES"
+    entitlements:
+      path: RemoteSSH.entitlements
+      properties:
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(CFBundleIdentifier)
     info:
       path: RemoteSSH-Info.plist
       properties:

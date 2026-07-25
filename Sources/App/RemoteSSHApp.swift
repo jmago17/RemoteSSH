@@ -11,6 +11,7 @@ struct RemoteSSHApp: App {
                 .task {
                     // Wire notifications: taps/links open a session; ntfy
                     // messages become iOS notifications.
+                    model.startCloudSync()
                     router.configure()
                     router.onOpenSession = { model.requestOpen($0) }
                     model.onAttention = { session, body in
