@@ -40,15 +40,16 @@ The watcher sends a JSON payload (Brrr API fields):
 
 ### Notification icon (`image_url`)
 
-Brrr shows `image_url` (a public HTTPS image) in the notification. A ready-made
-RemoteSSH icon is committed at [`assets/notification-icon.png`](../assets/notification-icon.png).
-Host it on any public URL and set `BRRR_ICON_URL` in the plist. Easy options:
+Brrr shows `image_url` (a public HTTPS image) in the notification. The RemoteSSH
+icon is already hosted (Cloudflare Pages) and used by default:
 
-- **GitHub**: push the repo, use the raw URL
-  `https://raw.githubusercontent.com/<you>/RemoteSSH/main/assets/notification-icon.png`.
-- **Cloudflare** R2 (public bucket) or Pages — upload the PNG, use its URL.
+```
+https://remotessh-assets.pages.dev/notification-icon.png
+```
 
-Leave `BRRR_ICON_URL` empty to send notifications without an image.
+The source PNG is at [`assets/notification-icon.png`](../assets/notification-icon.png);
+redeploy with `wrangler pages deploy assets --project-name remotessh-assets` to
+change it. Set `BRRR_ICON_URL` to override, or empty to disable the image.
 
 ## 2. Store the secret in the Keychain (not in any file)
 

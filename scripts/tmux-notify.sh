@@ -22,7 +22,9 @@ set -u
 BACKEND="${NOTIFY_BACKEND:-}"
 BRRR_API_URL="${BRRR_API_URL:-}"
 BRRR_KEYCHAIN_SERVICE="${BRRR_KEYCHAIN_SERVICE:-remotessh-brrr-webhook-secret}"
-BRRR_ICON_URL="${BRRR_ICON_URL:-}"   # optional public HTTPS image shown in the notification
+# Public HTTPS image shown in the notification (hosted RemoteSSH icon). Override
+# or set empty to disable.
+BRRR_ICON_URL="${BRRR_ICON_URL:-https://remotessh-assets.pages.dev/notification-icon.png}"
 NTFY_SERVER="${NTFY_SERVER:-https://ntfy.sh}"
 NTFY_TOPIC="${NTFY_TOPIC:-}"
 SILENCE_SECS="${SILENCE_SECS:-20}"

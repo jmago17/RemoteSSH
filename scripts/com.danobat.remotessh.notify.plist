@@ -28,9 +28,9 @@
              service 'remotessh-brrr-webhook-secret' — do NOT put it here. -->
         <key>BRRR_API_URL</key>
         <string>REPLACE-WITH-YOUR-BRRR-WEBHOOK-URL</string>
-        <!-- Optional public HTTPS image shown in the notification (see docs). -->
+        <!-- Public image shown in the notification (hosted RemoteSSH icon). -->
         <key>BRRR_ICON_URL</key>
-        <string></string>
+        <string>https://remotessh-assets.pages.dev/notification-icon.png</string>
         <key>SILENCE_SECS</key>
         <string>20</string>
         <key>TMUX_BIN</key>
