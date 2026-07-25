@@ -64,6 +64,7 @@ final class SessionListModel {
     /// Starts iCloud Key-Value sync: pulls the latest, and reloads whenever
     /// another device changes settings.
     func startCloudSync() {
+        store.migrateCredentialsToSyncIfNeeded()
         NSUbiquitousKeyValueStore.default.synchronize()
         guard cloudObserver == nil else { return }
         cloudObserver = NotificationCenter.default.addObserver(

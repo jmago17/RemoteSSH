@@ -185,4 +185,20 @@ struct SettingsStore {
     func hasStoredSecret(for config: SSHConnectionConfig) -> Bool {
         KeychainStore.get(secretAccount(for: config)) != nil
     }
+
+    /// One-time per device: re-save existing credentials so they become
+    /// iCloud-synchronizable. Older builds stored them device-only, so a host
+    /// synced to another device but its credential didn't. Re-saving upgrades
+    /// them (KeychainStore.set now writes synchronizable items).
+    func migrateCredentialsToSyncIfNeeded() {
+        let flag = "credentialsMigratedToSyncV1"
+        guard !defaults.bool(forKey: flag) else { return }
+        for host in loadHosts() {
+            let account = secretAccount(for: host)
+            if let secret = KeychainStore.get(account) {
+                try? KeychainStore.set(secret, for: account)
+            }
+        }
+        defaults.set(true, forKey: flag)
+    }
 }
