@@ -71,7 +71,8 @@ notify_brrr() {
 import json, os, urllib.parse
 s = os.environ["SESSION"]
 d = {
-    "title": s + " needs attention",
+    "title": s,
+    "subtitle": "needs attention",
     "message": os.environ["BODY"],
     "open_url": "remotessh://open/" + urllib.parse.quote(s, safe=""),
     "interruption_level": "time-sensitive",
