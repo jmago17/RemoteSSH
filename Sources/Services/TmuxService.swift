@@ -109,6 +109,14 @@ struct TmuxService {
         }
     }
 
+    /// Wakes the Mac's display (only works if the Mac already answers SSH).
+    /// `caffeinate` lives in /usr/bin, so the minimal SSH PATH is fine.
+    func wakeDisplay(config: SSHConnectionConfig, credential: SSHCredential) async throws {
+        try await withShell(config: config, credential: credential) { shell in
+            _ = try await shell.run("caffeinate -u -t 1 >/dev/null 2>&1 || true")
+        }
+    }
+
     // MARK: Connection lifecycle
 
     /// Runs `body` against a connected shell, guaranteeing disconnect. The

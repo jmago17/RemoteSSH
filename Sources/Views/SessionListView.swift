@@ -52,6 +52,18 @@ struct SessionListView: View {
                             } label: {
                                 Label("Restore Saved Sessions", systemImage: "arrow.clockwise.circle")
                             }
+                            if model.config.canWakeOnLAN {
+                                Button {
+                                    model.wakeOnLAN()
+                                } label: {
+                                    Label("Wake Mac (LAN)", systemImage: "power")
+                                }
+                            }
+                            Button {
+                                Task { await model.wakeDisplay() }
+                            } label: {
+                                Label("Wake Display", systemImage: "sun.max")
+                            }
                         } label: {
                             Image(systemName: "ellipsis.circle")
                         }
@@ -148,6 +160,10 @@ struct SessionListView: View {
             } description: {
                 Text(error)
             } actions: {
+                if model.config.canWakeOnLAN {
+                    Button("Wake Mac") { model.wakeOnLAN() }
+                        .buttonStyle(.borderedProminent)
+                }
                 Button("Retry") { Task { await model.refresh() } }
                 Button("Settings") { showingSettings = true }
             }

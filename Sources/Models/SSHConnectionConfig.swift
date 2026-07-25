@@ -9,6 +9,14 @@ struct SSHConnectionConfig: Codable, Identifiable, Hashable {
     var username: String = ""
     var port: Int = 22
 
+    /// Optional MAC address (e.g. "AA:BB:CC:DD:EE:FF") for Wake-on-LAN when the
+    /// Mac is asleep/unreachable. Optional so older saved hosts still decode.
+    var macAddress: String?
+
+    var canWakeOnLAN: Bool {
+        (macAddress ?? "").split(whereSeparator: { $0 == ":" || $0 == "-" }).count == 6
+    }
+
     /// Which authentication method the stored secret represents.
     var authKind: AuthKind = .password
 

@@ -88,6 +88,30 @@ final class SessionListModel {
         store.hasStoredSecret(for: config)
     }
 
+    // MARK: Wake
+
+    /// Broadcasts a Wake-on-LAN packet to the active host, then retries the poll.
+    func wakeOnLAN() {
+        guard config.canWakeOnLAN, let mac = config.macAddress else { return }
+        let host = config.host
+        Task.detached { WakeOnLAN.wake(macAddress: mac, host: host) }
+        errorMessage = "Sent wake signal to \(config.name). Waiting for \(config.host) to come up…"
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            await self?.refresh()
+        }
+    }
+
+    /// Wakes the Mac's display via `caffeinate` (requires an existing connection).
+    func wakeDisplay() async {
+        guard let credential = store.loadCredential(for: config) else { return }
+        do {
+            try await tmux.wakeDisplay(config: config, credential: credential)
+        } catch {
+            errorMessage = friendly(error)
+        }
+    }
+
     // MARK: Notifications
 
     /// Opens a session from a notification tap or `remotessh://open/<name>` link.

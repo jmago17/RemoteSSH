@@ -48,6 +48,15 @@ struct HostEditorView: View {
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
                     }
+                    LabeledContent("MAC (Wake-on-LAN)") {
+                        TextField("optional AA:BB:CC:DD:EE:FF", text: Binding(
+                            get: { draft.macAddress ?? "" },
+                            set: { draft.macAddress = $0.isEmpty ? nil : $0 }
+                        ))
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .multilineTextAlignment(.trailing)
+                    }
                     if HostKeyStore.hasTrustedKey(host: draft.host, port: draft.port) {
                         Button("Reset Trusted Host Key", role: .destructive) {
                             HostKeyStore.resetTrust(host: draft.host, port: draft.port)
