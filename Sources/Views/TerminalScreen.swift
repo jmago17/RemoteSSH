@@ -25,6 +25,57 @@ struct TerminalScreen: View {
     /// canvas gets room to breathe and "back" means clearing the selection.
     private var isRegular: Bool { horizontalSizeClass.isRegular }
 
+    /// Which slot the long-press picker is editing, if any.
+    @State private var editingSlot: KeyRailSlot?
+    /// When true the expanded key panel replaces the software keyboard.
+    @State private var showAllKeys = false
+    /// Slot assignments, mirrored so the rail redraws when the picker writes.
+    @AppStorage(KeyRailSlot.one.storageKey) private var slot1Raw = KeyRailSlot.one.default.rawValue
+    @AppStorage(KeyRailSlot.two.storageKey) private var slot2Raw = KeyRailSlot.two.default.rawValue
+    @AppStorage(KeyRailSlot.three.storageKey) private var slot3Raw = KeyRailSlot.three.default.rawValue
+    @FocusState private var keyboardHidden: Bool
+
+    /// Roughly a software-keyboard's worth of height, so the visible terminal
+    /// rows don't jump when swapping one for the other.
+    private var expandedPanelHeight: CGFloat { isRegular ? 300 : 260 }
+
+    private func slotKey(_ slot: KeyRailSlot) -> TerminalSession.SpecialKey {
+        let raw: String
+        switch slot {
+        case .one: raw = slot1Raw
+        case .two: raw = slot2Raw
+        case .three: raw = slot3Raw
+        }
+        return TerminalSession.SpecialKey(rawValue: raw) ?? slot.default
+    }
+
+    private func slotBinding(_ slot: KeyRailSlot) -> Binding<TerminalSession.SpecialKey> {
+        Binding(
+            get: { slotKey(slot) },
+            set: { newValue in
+                switch slot {
+                case .one: slot1Raw = newValue.rawValue
+                case .two: slot2Raw = newValue.rawValue
+                case .three: slot3Raw = newValue.rawValue
+                }
+            }
+        )
+    }
+
+    /// Swaps the software keyboard for the full key catalog (and back). The
+    /// terminal keeps first responder either way, so typed input still lands.
+    private func toggleAllKeys() {
+        withAnimation(.snappy(duration: 0.22)) {
+            showAllKeys.toggle()
+        }
+        if showAllKeys {
+            UIApplication.shared.sendAction(
+                #selector(UIResponder.resignFirstResponder),
+                to: nil, from: nil, for: nil
+            )
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             StatusRail(phase: terminal?.phase, hasSetupError: setupError != nil)
@@ -49,6 +100,18 @@ struct TerminalScreen: View {
             }
 
             keyRail
+
+            if showAllKeys {
+                ExpandedKeyPanel(
+                    send: { terminal?.sendKey($0) },
+                    dismiss: { withAnimation(.snappy(duration: 0.22)) { showAllKeys = false } }
+                )
+                .frame(height: expandedPanelHeight)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .sheet(item: $editingSlot) { slot in
+            KeyRailSlotPicker(slot: slot, selection: slotBinding(slot))
         }
         .background(Theme.terminalBG)
         .navigationTitle(sessionName)
@@ -120,11 +183,31 @@ struct TerminalScreen: View {
     /// they keep their intrinsic width and sit leading.
     private var keyRail: some View {
         HStack(spacing: isRegular ? 7 : 6) {
+            // Fixed: escape earns its slot in every terminal.
             KeyCap("esc", spoken: "Escape", stretches: !isRegular) { terminal?.sendKey(.escape) }
-            KeyCap("tab", spoken: "Tab", stretches: !isRegular) { terminal?.sendKey(.tab) }
-            KeyCap("⇧⇥", spoken: "Shift Tab", stretches: !isRegular) { terminal?.sendKey(.shiftTab) }
-            KeyCap("^C", spoken: "Control C", stretches: !isRegular) { terminal?.sendKey(.ctrlC) }
-            KeyCap("⌃b d", spoken: "Detach", stretches: !isRegular) { terminal?.sendKey(.detach) }
+
+            // Three user-assignable slots. Long-press a cap to reassign it.
+            ForEach(KeyRailSlot.allCases) { slot in
+                let key = slotKey(slot)
+                KeyCap(key.label, spoken: key.spoken, stretches: !isRegular) {
+                    terminal?.sendKey(key)
+                }
+                .contextMenu {
+                    Button {
+                        editingSlot = slot
+                    } label: {
+                        Label("Change \(slot.spokenPosition) key", systemImage: "square.grid.2x2")
+                    }
+                }
+            }
+
+            // Fixed: everything else lives behind this, in place of the keyboard.
+            KeyCap(symbol: showAllKeys ? "chevron.down" : "square.grid.2x2",
+                   spoken: showAllKeys ? "Hide all keys" : "Show all keys",
+                   stretches: !isRegular) {
+                toggleAllKeys()
+            }
+
             if isRegular { Spacer(minLength: 0) }
         }
         .padding(.horizontal, isRegular ? 14 : 12)

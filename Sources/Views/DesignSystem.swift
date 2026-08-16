@@ -210,6 +210,8 @@ struct KeyCap: View {
     var spoken: String?
     var stretches: Bool = true
     let action: () -> Void
+    /// When set, the cap renders this SF Symbol instead of `label`.
+    var symbol: String?
 
     init(
         _ label: String,
@@ -221,14 +223,37 @@ struct KeyCap: View {
         self.spoken = spoken
         self.stretches = stretches
         self.action = action
+        self.symbol = nil
+    }
+
+    /// A cap whose face is an SF Symbol — for actions (like "show all keys")
+    /// where a glyph reads better than a typed character.
+    init(
+        symbol: String,
+        spoken: String,
+        stretches: Bool = true,
+        action: @escaping () -> Void
+    ) {
+        self.label = ""
+        self.spoken = spoken
+        self.stretches = stretches
+        self.action = action
+        self.symbol = symbol
     }
 
     var body: some View {
         Button(action: action) {
-            Text(label)
-                .font(.mono(12, .medium))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+            Group {
+                if let symbol {
+                    Image(systemName: symbol)
+                        .font(.system(size: 13, weight: .medium))
+                } else {
+                    Text(label)
+                        .font(.mono(12, .medium))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+            }
                 .foregroundStyle(Theme.textSecondary)
                 .padding(.horizontal, stretches ? 0 : 14)
                 .frame(maxWidth: stretches ? .infinity : nil)

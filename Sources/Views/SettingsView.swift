@@ -19,9 +19,14 @@ struct SettingsView: View {
 
     private let store = SettingsStore()
 
+    /// Key-rail slot being reassigned, and a revision counter so the rows
+    /// refresh after `UserDefaults` is written behind SwiftUI's back.
+    @State private var editingSlot: KeyRailSlot?
+    @State private var keyRailRevision = 0
+
     /// The categories the iPad sidebar lists.
     enum Pane: String, CaseIterable, Identifiable, Hashable {
-        case hosts, notifications, polling
+        case hosts, notifications, polling, keyRail
 
         var id: Self { self }
 
@@ -30,6 +35,7 @@ struct SettingsView: View {
             case .hosts: "Hosts"
             case .notifications: "Notifications"
             case .polling: "Polling"
+            case .keyRail: "Key Rail"
             }
         }
 
@@ -38,6 +44,7 @@ struct SettingsView: View {
             case .hosts: "server.rack"
             case .notifications: "bell"
             case .polling: "arrow.clockwise"
+            case .keyRail: "keyboard"
             }
         }
     }
@@ -81,6 +88,7 @@ struct SettingsView: View {
 
                 notificationsSection
                 pollingSection
+                keyRailSection
             }
             .phosphorForm()
             .navigationTitle("Settings")
@@ -139,6 +147,12 @@ struct SettingsView: View {
                 .navigationTitle("Polling")
                 .navigationBarTitleDisplayMode(.inline)
                 .phosphorNavigationBar()
+        case .keyRail:
+            Form { keyRailSection }
+                .phosphorForm()
+                .navigationTitle("Key Rail")
+                .navigationBarTitleDisplayMode(.inline)
+                .phosphorNavigationBar()
         }
     }
 
@@ -151,6 +165,56 @@ struct SettingsView: View {
     }
 
     // MARK: Sections
+
+    /// The three assignable caps on the terminal's key rail. `esc` and the
+    /// all-keys button are fixed, so only these three are listed.
+    private var keyRailSection: some View {
+        Section {
+            ForEach(KeyRailSlot.allCases) { slot in
+                Button {
+                    editingSlot = slot
+                } label: {
+                    HStack {
+                        Text("Slot \(slot.rawValue)")
+                            .foregroundStyle(Theme.text)
+                        Spacer()
+                        Text(KeyRailConfig.key(for: slot).label)
+                            .font(.mono(13, .medium))
+                            .foregroundStyle(Theme.textSecondary)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                }
+            }
+
+            Button("Reset to Defaults") {
+                KeyRailConfig.reset()
+                keyRailRevision += 1
+            }
+            .foregroundStyle(Theme.warn)
+        } header: {
+            SectionHeaderText("Key Rail")
+        } footer: {
+            Text("esc and the all-keys button are always shown. Long-press a key in the terminal to change it there.")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textTertiary)
+        }
+        .id(keyRailRevision)
+        .sheet(item: $editingSlot) { slot in
+            KeyRailSlotPicker(slot: slot, selection: keyRailBinding(slot))
+        }
+    }
+
+    private func keyRailBinding(_ slot: KeyRailSlot) -> Binding<TerminalSession.SpecialKey> {
+        Binding(
+            get: { KeyRailConfig.key(for: slot) },
+            set: { newValue in
+                KeyRailConfig.set(newValue, for: slot)
+                keyRailRevision += 1
+            }
+        )
+    }
 
     private var notificationsSection: some View {
         Section {
@@ -205,6 +269,9 @@ struct SettingsView: View {
         case .hosts: activeHostLabel
         case .notifications: notificationsEnabled ? "on" : "off"
         case .polling: "\(Int(interval))s"
+        case .keyRail: KeyRailSlot.allCases
+            .map { KeyRailConfig.key(for: $0).label }
+            .joined(separator: " ")
         }
     }
 
