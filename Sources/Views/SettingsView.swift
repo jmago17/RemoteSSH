@@ -2,18 +2,66 @@ import SwiftUI
 
 /// App-wide settings: host management (see `HostListView`), notifications, and
 /// polling.
+///
+/// Same adaptive rule as the session list: one pushed form at compact width, a
+/// two-column split (categories → pane) at regular width, where the Hosts list
+/// becomes a real detail column instead of a screen you push and pop.
 struct SettingsView: View {
     @Bindable var model: SessionListModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var interval: Double = 5
     @State private var notificationsEnabled = false
     @State private var ntfyServer = "https://ntfy.sh"
     @State private var ntfyTopic = ""
+    @State private var pane: Pane? = .hosts
 
     private let store = SettingsStore()
 
+    /// The categories the iPad sidebar lists.
+    enum Pane: String, CaseIterable, Identifiable, Hashable {
+        case hosts, notifications, polling
+
+        var id: Self { self }
+
+        var title: String {
+            switch self {
+            case .hosts: "Hosts"
+            case .notifications: "Notifications"
+            case .polling: "Polling"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .hosts: "server.rack"
+            case .notifications: "bell"
+            case .polling: "arrow.clockwise"
+            }
+        }
+    }
+
     var body: some View {
+        Group {
+            if horizontalSizeClass.isRegular {
+                splitLayout
+            } else {
+                stackLayout
+            }
+        }
+        .tint(Theme.link)
+        .onAppear {
+            interval = model.pollInterval
+            notificationsEnabled = store.notificationsEnabled
+            ntfyServer = store.ntfyServer
+            ntfyTopic = store.ntfyTopic
+        }
+    }
+
+    // MARK: Containers
+
+    private var stackLayout: some View {
         NavigationStack {
             Form {
                 Section {
@@ -31,45 +79,28 @@ struct SettingsView: View {
                 }
                 .listRowBackground(Theme.surface)
 
-                Section {
-                    Toggle("Notifications", isOn: $notificationsEnabled)
-                        .tint(Theme.live)
-                    if notificationsEnabled {
-                        LabeledContent("ntfy Server") {
-                            TextField("https://ntfy.sh", text: $ntfyServer)
-                                .font(.mono(13.5))
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .keyboardType(.URL)
-                                .multilineTextAlignment(.trailing)
-                        }
-                        LabeledContent("Topic") {
-                            TextField("your-private-topic", text: $ntfyTopic)
-                                .font(.mono(13.5))
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .multilineTextAlignment(.trailing)
-                        }
-                    }
-                } header: {
-                    SectionHeaderText("Notifications")
-                } footer: {
-                    Text("Get pushed when a session needs attention. Run scripts/tmux-notify.sh on your Mac and subscribe to the same private topic here (and in the ntfy app for background pushes). Pick a hard-to-guess topic — anyone with it can send you notifications.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                .listRowBackground(Theme.surface)
+                notificationsSection
+                pollingSection
+            }
+            .phosphorForm()
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .phosphorNavigationBar()
+            .toolbar { doneButton }
+        }
+    }
 
-                Section {
-                    LabeledContent("Refresh") {
-                        Text("every \(Int(interval))s")
-                            .font(.mono(13.5))
-                            .foregroundStyle(Theme.textSecondary)
+    private var splitLayout: some View {
+        NavigationSplitView {
+            List(Pane.allCases, selection: $pane) { pane in
+                Label {
+                    LabeledContent(pane.title) {
+                        Text(summary(for: pane))
+                            .font(.mono(12))
+                            .foregroundStyle(Theme.textTertiary)
                     }
-                    Slider(value: $interval, in: 2...60, step: 1)
-                        .tint(Theme.live)
-                } header: {
-                    SectionHeaderText("Polling")
+                } icon: {
+                    Image(systemName: pane.icon).foregroundStyle(Theme.link)
                 }
                 .listRowBackground(Theme.surface)
             }
@@ -77,19 +108,103 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .phosphorNavigationBar()
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { save(); dismiss() }
-                        .fontWeight(.semibold)
-                }
+            .navigationSplitViewColumnWidth(
+                min: SplitMetrics.settingsSidebarMin,
+                ideal: SplitMetrics.settingsSidebarIdeal,
+                max: SplitMetrics.settingsSidebarMax
+            )
+            .toolbar { doneButton }
+        } detail: {
+            NavigationStack {
+                detailPane
             }
         }
-        .tint(Theme.link)
-        .onAppear {
-            interval = model.pollInterval
-            notificationsEnabled = store.notificationsEnabled
-            ntfyServer = store.ntfyServer
-            ntfyTopic = store.ntfyTopic
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    @ViewBuilder
+    private var detailPane: some View {
+        switch pane {
+        case .hosts, .none:
+            HostListView(model: model)
+        case .notifications:
+            Form { notificationsSection }
+                .phosphorForm()
+                .navigationTitle("Notifications")
+                .navigationBarTitleDisplayMode(.inline)
+                .phosphorNavigationBar()
+        case .polling:
+            Form { pollingSection }
+                .phosphorForm()
+                .navigationTitle("Polling")
+                .navigationBarTitleDisplayMode(.inline)
+                .phosphorNavigationBar()
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var doneButton: some ToolbarContent {
+        ToolbarItem(placement: .confirmationAction) {
+            Button("Done") { save(); dismiss() }
+                .fontWeight(.semibold)
+        }
+    }
+
+    // MARK: Sections
+
+    private var notificationsSection: some View {
+        Section {
+            Toggle("Notifications", isOn: $notificationsEnabled)
+                .tint(Theme.live)
+            if notificationsEnabled {
+                LabeledContent("ntfy Server") {
+                    TextField("https://ntfy.sh", text: $ntfyServer)
+                        .font(.mono(13.5))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Topic") {
+                    TextField("your-private-topic", text: $ntfyTopic)
+                        .font(.mono(13.5))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+        } header: {
+            SectionHeaderText("Notifications")
+        } footer: {
+            Text("Get pushed when a session needs attention. Run scripts/tmux-notify.sh on your Mac and subscribe to the same private topic here (and in the ntfy app for background pushes). Pick a hard-to-guess topic — anyone with it can send you notifications.")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textTertiary)
+        }
+        .listRowBackground(Theme.surface)
+    }
+
+    private var pollingSection: some View {
+        Section {
+            LabeledContent("Refresh") {
+                Text("every \(Int(interval))s")
+                    .font(.mono(13.5))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            Slider(value: $interval, in: 2...60, step: 1)
+                .tint(Theme.live)
+        } header: {
+            SectionHeaderText("Polling")
+        }
+        .listRowBackground(Theme.surface)
+    }
+
+    // MARK: Derived state
+
+    private func summary(for pane: Pane) -> String {
+        switch pane {
+        case .hosts: activeHostLabel
+        case .notifications: notificationsEnabled ? "on" : "off"
+        case .polling: "\(Int(interval))s"
         }
     }
 

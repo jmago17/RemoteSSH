@@ -36,6 +36,12 @@ as a target — trust a clean `xcodebuild` over those.
   `Sendable` values across the `@MainActor` boundary. Do not store a
   `RemoteShell`/`SSHClient` on an actor.
 - Secrets go in the **Keychain** (`KeychainStore`), never UserDefaults or disk.
+- **Adaptive layout.** One rule, in `AdaptiveLayout.swift`: read
+  `@Environment(\.horizontalSizeClass)` and ask it `.isRegular` — never
+  `UIDevice.userInterfaceIdiom`, so Split View / Slide Over get the phone
+  layout when they are phone-width. Regular width = `NavigationSplitView`
+  (session list → terminal detail; Settings categories → pane); compact =
+  `NavigationStack`. Column widths live in `SplitMetrics`.
 - SwiftUI: MV pattern — `@Observable` model injected into views; no view models
   per screen beyond `SessionListModel`.
 

@@ -18,6 +18,12 @@ final class SessionListModel {
     /// observes this and navigates.
     var pendingOpenSession: String?
 
+    /// The session currently open in the terminal — the pushed screen at
+    /// compact width, the detail column at regular width. Held as a *name*
+    /// rather than a `TmuxSession` so it survives the poll that replaces every
+    /// session value (preview and hash change every few seconds).
+    var selectedSessionName: String?
+
     /// Set by the app to deliver an ntfy "needs attention" message as an iOS
     /// notification (session name, body).
     @ObservationIgnored var onAttention: ((String, String) -> Void)?
@@ -87,6 +93,7 @@ final class SessionListModel {
         reloadConfig()
         sessions = []
         lastSeenHash = [:]
+        selectedSessionName = nil
         Task { await refresh() }
     }
 
@@ -218,12 +225,16 @@ final class SessionListModel {
         await mutate { tmux, config, credential in
             try await tmux.killSession(name, config: config, credential: credential)
         }
+        // The detail column would otherwise keep a pane open on a session that
+        // no longer exists.
+        if selectedSessionName == name { selectedSessionName = nil }
     }
 
     func rename(_ name: String, to newName: String) async {
         await mutate { tmux, config, credential in
             try await tmux.renameSession(name, to: newName, config: config, credential: credential)
         }
+        if selectedSessionName == name { selectedSessionName = newName }
     }
 
     func createSession(_ name: String) async {

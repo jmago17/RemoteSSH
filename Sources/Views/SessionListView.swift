@@ -2,132 +2,202 @@ import SwiftUI
 
 /// The "chat list": one row per tmux session, with the active host's identity
 /// sitting under the title as the way into Settings.
+///
+/// Adaptive shell: at regular width (iPad, and iPad multitasking wide enough
+/// to count) the list is the *sidebar* of a `NavigationSplitView` and the
+/// terminal lives inline in the detail column; at compact width (iPhone) it
+/// stays the `NavigationStack` it has always been and the terminal is pushed.
+/// Both paths share one selection — `model.selectedSessionName` — so nothing
+/// is lost when the size class flips mid-session.
 struct SessionListView: View {
     @Bindable var model: SessionListModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     @State private var showingSettings = false
     @State private var renameTarget: TmuxSession?
     @State private var renameText = ""
     @State private var showingNewSession = false
     @State private var newSessionName = ""
+    @State private var columnVisibility = NavigationSplitViewVisibility.all
 
-    @State private var path: [TmuxSession] = []
+    private var isRegular: Bool { horizontalSizeClass.isRegular }
 
     var body: some View {
-        NavigationStack(path: $path) {
-            Group {
-                if !model.isConfigured {
-                    unconfiguredState
-                } else if model.sessions.isEmpty {
-                    emptyState
-                } else {
-                    sessionList
-                }
-            }
-            .background(Theme.bg)
-            .navigationDestination(for: TmuxSession.self) { session in
-                TerminalScreen(session: session, model: model)
-            }
-            .navigationTitle("Sessions")
-            .phosphorNavigationBar(opaque: false)
-            .toolbar {
-                if model.isConfigured {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            newSessionName = ""
-                            showingNewSession = true
-                        } label: {
-                            Image(systemName: "plus")
-                        }
-                        .accessibilityLabel("New Session")
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Button {
-                                Task { await model.restoreSessions() }
-                            } label: {
-                                Label("Restore Saved Sessions", systemImage: "arrow.clockwise.circle")
-                            }
-                            if model.config.canWakeOnLAN {
-                                Button {
-                                    model.wakeOnLAN()
-                                } label: {
-                                    Label("Wake Mac (LAN)", systemImage: "power")
-                                }
-                            }
-                            Button {
-                                Task { await model.wakeDisplay() }
-                            } label: {
-                                Label("Wake Display", systemImage: "sun.max")
-                            }
-                            Divider()
-                            Button {
-                                showingSettings = true
-                            } label: {
-                                Label("Settings", systemImage: "gearshape")
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis")
-                        }
-                        .accessibilityLabel("More")
-                    }
-                } else {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showingSettings = true
-                        } label: {
-                            Image(systemName: "gearshape")
-                        }
-                        .accessibilityLabel("Settings")
-                    }
-                }
-                if model.isRefreshing {
-                    ToolbarItem(placement: .topBarLeading) {
-                        ProgressView().tint(Theme.textTertiary)
-                    }
-                }
-            }
-            .sheet(isPresented: $showingSettings) {
-                SettingsView(model: model)
-            }
-            .alert("New Session", isPresented: $showingNewSession) {
-                TextField("Session name", text: $newSessionName)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                Button("Cancel", role: .cancel) { }
-                Button("Create") {
-                    let name = newSessionName.trimmingCharacters(in: .whitespaces)
-                    guard !name.isEmpty else { return }
-                    Task { await model.createSession(name) }
-                }
-            } message: {
-                Text("Creates a detached tmux session on \(model.config.host).")
-            }
-            .alert("Rename Session", isPresented: renameBinding) {
-                TextField("New name", text: $renameText)
-                Button("Cancel", role: .cancel) { renameTarget = nil }
-                Button("Rename") {
-                    if let target = renameTarget {
-                        let newName = renameText
-                        Task { await model.rename(target.name, to: newName) }
-                    }
-                    renameTarget = nil
-                }
+        Group {
+            if isRegular {
+                splitLayout
+            } else {
+                stackLayout
             }
         }
         .tint(Theme.link)
+        .sheet(isPresented: $showingSettings) {
+            if isRegular {
+                // A form-sheet is too cramped for Settings' own two columns.
+                SettingsView(model: model).presentationSizing(.page)
+            } else {
+                SettingsView(model: model)
+            }
+        }
+        .alert("New Session", isPresented: $showingNewSession) {
+            TextField("Session name", text: $newSessionName)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("Cancel", role: .cancel) { }
+            Button("Create") {
+                let name = newSessionName.trimmingCharacters(in: .whitespaces)
+                guard !name.isEmpty else { return }
+                Task { await model.createSession(name) }
+            }
+        } message: {
+            Text("Creates a detached tmux session on \(model.config.host).")
+        }
+        .alert("Rename Session", isPresented: renameBinding) {
+            TextField("New name", text: $renameText)
+            Button("Cancel", role: .cancel) { renameTarget = nil }
+            Button("Rename") {
+                if let target = renameTarget {
+                    let newName = renameText
+                    Task { await model.rename(target.name, to: newName) }
+                }
+                renameTarget = nil
+            }
+        }
         .task {
             model.reloadConfig()
             model.startPolling()
         }
         .onChange(of: model.pendingOpenSession) { _, name in
             guard let name else { return }
-            if !path.contains(where: { $0.name == name }) {
-                path.append(TmuxSession(name: name, isAttached: false, created: .now,
-                                        lastActivity: .now, preview: "", contentHash: 0))
-            }
+            model.selectedSessionName = name
             model.pendingOpenSession = nil
         }
         .onDisappear { model.stopPolling() }
+    }
+
+    // MARK: Containers
+
+    /// iPhone / compact: today's push navigation, unchanged. The stack path is
+    /// derived from the shared selection so there is a single source of truth.
+    private var stackLayout: some View {
+        NavigationStack(path: stackPath) {
+            sidebar
+                .navigationDestination(for: String.self) { name in
+                    TerminalScreen(sessionName: name, model: model)
+                }
+        }
+    }
+
+    /// iPad / regular: sessions on the left, the attached terminal on the right.
+    private var splitLayout: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebar
+                .navigationSplitViewColumnWidth(
+                    min: SplitMetrics.sidebarMin,
+                    ideal: SplitMetrics.sidebarIdeal,
+                    max: SplitMetrics.sidebarMax
+                )
+        } detail: {
+            NavigationStack {
+                if let name = model.selectedSessionName {
+                    // A fresh identity per session so switching rows tears the
+                    // old PTY down and attaches the new one.
+                    TerminalScreen(sessionName: name, model: model)
+                        .id(name)
+                } else {
+                    NoSessionSelected(isConfigured: model.isConfigured)
+                }
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    /// The list itself — identical content in both containers.
+    private var sidebar: some View {
+        Group {
+            if !model.isConfigured {
+                unconfiguredState
+            } else if model.sessions.isEmpty {
+                emptyState
+            } else {
+                sessionList
+            }
+        }
+        .background(Theme.bg)
+        .navigationTitle("Sessions")
+        // A split-view sidebar defaults to an inline title; the phone's large
+        // title is the identity, so keep it on both.
+        .navigationBarTitleDisplayMode(.large)
+        .phosphorNavigationBar(opaque: false)
+        .toolbar { listToolbar }
+    }
+
+    @ToolbarContentBuilder
+    private var listToolbar: some ToolbarContent {
+        if model.isConfigured {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    newSessionName = ""
+                    showingNewSession = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("New Session")
+                .keyboardShortcut("n", modifiers: .command)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        Task { await model.refresh() }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .keyboardShortcut("r", modifiers: .command)
+                    Button {
+                        Task { await model.restoreSessions() }
+                    } label: {
+                        Label("Restore Saved Sessions", systemImage: "arrow.clockwise.circle")
+                    }
+                    if model.config.canWakeOnLAN {
+                        Button {
+                            model.wakeOnLAN()
+                        } label: {
+                            Label("Wake Mac (LAN)", systemImage: "power")
+                        }
+                    }
+                    Button {
+                        Task { await model.wakeDisplay() }
+                    } label: {
+                        Label("Wake Display", systemImage: "sun.max")
+                    }
+                    Divider()
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                    .keyboardShortcut(",", modifiers: .command)
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .accessibilityLabel("More")
+            }
+        } else {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showingSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .accessibilityLabel("Settings")
+                .keyboardShortcut(",", modifiers: .command)
+            }
+        }
+        if model.isRefreshing {
+            ToolbarItem(placement: .topBarLeading) {
+                ProgressView().tint(Theme.textTertiary)
+            }
+        }
     }
 
     private var sessionList: some View {
@@ -138,6 +208,7 @@ struct SessionListView: View {
                 HostChip(label: hostLabel, isConnected: model.errorMessage == nil)
             }
             .buttonStyle(.plain)
+            .hoverEffect(.highlight)
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
@@ -154,11 +225,12 @@ struct SessionListView: View {
                 // its own trailing unread dot, so the system disclosure
                 // chevron would be noise.
                 Button {
-                    path.append(session)
+                    model.selectedSessionName = session.name
                 } label: {
                     SessionRowView(session: session)
                 }
-                .buttonStyle(RowButtonStyle())
+                .buttonStyle(RowButtonStyle(isSelected: isSelected(session)))
+                .hoverEffect(.highlight)
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets())
                 .listRowSeparatorTint(Theme.hairline)
@@ -254,6 +326,22 @@ struct SessionListView: View {
                 .foregroundStyle(Theme.onLive)
         }
         .tint(Theme.link)
+    }
+
+    // MARK: Derived state
+
+    /// Only the split view shows a persistent selection — on the stack the
+    /// pushed screen *is* the selection.
+    private func isSelected(_ session: TmuxSession) -> Bool {
+        isRegular && model.selectedSessionName == session.name
+    }
+
+    /// One-deep stack path backed by the shared selection.
+    private var stackPath: Binding<[String]> {
+        Binding(
+            get: { model.selectedSessionName.map { [$0] } ?? [] },
+            set: { model.selectedSessionName = $0.last }
+        )
     }
 
     private var hostLabel: String {

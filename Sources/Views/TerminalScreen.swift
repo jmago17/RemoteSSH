@@ -8,7 +8,9 @@ import SwiftUI
 /// live / attaching / dropped at a glance, and a key rail for the keys the
 /// soft keyboard can't produce.
 struct TerminalScreen: View {
-    let session: TmuxSession
+    /// Identified by name, not by value: the poll replaces every `TmuxSession`
+    /// a few seconds later, and the split view's selection has to outlive that.
+    let sessionName: String
     @Bindable var model: SessionListModel
 
     @State private var terminal: TerminalSession?
@@ -17,6 +19,11 @@ struct TerminalScreen: View {
     @AppStorage("terminalFontSize") private var fontSize: Double = 13
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    /// At iPad width the pane is the detail column, not a pushed screen: the
+    /// canvas gets room to breathe and "back" means clearing the selection.
+    private var isRegular: Bool { horizontalSizeClass.isRegular }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,22 +36,22 @@ struct TerminalScreen: View {
                     // A new id on reconnect forces a fresh SwiftTerm view + attach.
                     TerminalHostView(session: terminal, fontSize: CGFloat(fontSize))
                         .id(generation)
-                        .padding(.horizontal, 6)
-                        .padding(.top, 6)
+                        .padding(.horizontal, isRegular ? 14 : 6)
+                        .padding(.top, isRegular ? 10 : 6)
                         .opacity(isConnecting(terminal) ? 0 : 1)
 
                     statusOverlay(terminal)
                 } else if let setupError {
                     attachFailed(setupError)
                 } else {
-                    connectingOverlay(command: "tmux attach -t \(session.name)")
+                    connectingOverlay(command: "tmux attach -t \(sessionName)")
                 }
             }
 
             keyRail
         }
         .background(Theme.terminalBG)
-        .navigationTitle(session.name)
+        .navigationTitle(sessionName)
         .navigationBarTitleDisplayMode(.inline)
         .phosphorNavigationBar()
         .toolbar {
@@ -64,6 +71,7 @@ struct TerminalScreen: View {
                         Button {
                             reconnect()
                         } label: { Label("Reconnect", systemImage: "arrow.clockwise") }
+                        .keyboardShortcut("r", modifiers: [.command, .shift])
                     }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -72,7 +80,7 @@ struct TerminalScreen: View {
             }
         }
         .onAppear {
-            model.markRead(session.name)
+            model.markRead(sessionName)
             setup()
         }
         .onDisappear { terminal?.stop() }
@@ -88,7 +96,7 @@ struct TerminalScreen: View {
     /// The inline title: session name over its host and live geometry.
     private var titleBlock: some View {
         VStack(spacing: 1) {
-            Text(session.name)
+            Text(sessionName)
                 .font(.mono(15, .semibold))
                 .kerning(-0.3)
                 .foregroundStyle(Theme.text)
@@ -107,16 +115,19 @@ struct TerminalScreen: View {
     }
 
     /// The keys the soft keyboard can't produce, surfaced instead of buried in
-    /// a menu.
+    /// a menu. On the phone the caps share the rail evenly; at iPad width
+    /// stretching five caps across 900pt would read as a toolbar of slabs, so
+    /// they keep their intrinsic width and sit leading.
     private var keyRail: some View {
-        HStack(spacing: 6) {
-            KeyCap("esc", spoken: "Escape") { terminal?.sendKey(.escape) }
-            KeyCap("tab", spoken: "Tab") { terminal?.sendKey(.tab) }
-            KeyCap("⇧⇥", spoken: "Shift Tab") { terminal?.sendKey(.shiftTab) }
-            KeyCap("^C", spoken: "Control C") { terminal?.sendKey(.ctrlC) }
-            KeyCap("⌃b d", spoken: "Detach") { terminal?.sendKey(.detach) }
+        HStack(spacing: isRegular ? 7 : 6) {
+            KeyCap("esc", spoken: "Escape", stretches: !isRegular) { terminal?.sendKey(.escape) }
+            KeyCap("tab", spoken: "Tab", stretches: !isRegular) { terminal?.sendKey(.tab) }
+            KeyCap("⇧⇥", spoken: "Shift Tab", stretches: !isRegular) { terminal?.sendKey(.shiftTab) }
+            KeyCap("^C", spoken: "Control C", stretches: !isRegular) { terminal?.sendKey(.ctrlC) }
+            KeyCap("⌃b d", spoken: "Detach", stretches: !isRegular) { terminal?.sendKey(.detach) }
+            if isRegular { Spacer(minLength: 0) }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, isRegular ? 14 : 12)
         .padding(.vertical, 9)
         .background(Theme.surface)
         .overlay(alignment: .top) {
@@ -132,7 +143,7 @@ struct TerminalScreen: View {
     private func statusOverlay(_ terminal: TerminalSession) -> some View {
         switch terminal.phase {
         case .connecting:
-            connectingOverlay(command: "tmux attach -t \(session.name)")
+            connectingOverlay(command: "tmux attach -t \(sessionName)")
         case .closed(let message):
             endedOverlay(message)
         case .live:
@@ -199,8 +210,8 @@ struct TerminalScreen: View {
                 .buttonStyle(.plain)
                 .padding(.top, 11)
 
-                Button { dismiss() } label: {
-                    Text("Back to sessions")
+                Button { leave() } label: {
+                    Text(isRegular ? "Pick another session" : "Back to sessions")
                         .font(.mono(13.5))
                         .foregroundStyle(Theme.textSecondary)
                         .frame(maxWidth: .infinity)
@@ -215,7 +226,7 @@ struct TerminalScreen: View {
             .padding(.horizontal, 20)
             .padding(.top, 22)
             .padding(.bottom, 18)
-            .frame(width: 280)
+            .frame(width: isRegular ? 340 : 280)
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
                     .fill(Theme.surface)
@@ -274,6 +285,16 @@ struct TerminalScreen: View {
 
     // MARK: Lifecycle
 
+    /// "Back": pop the stack on the phone, clear the detail column on iPad
+    /// (where there is nothing to pop back to — the list is already on screen).
+    private func leave() {
+        if isRegular {
+            model.selectedSessionName = nil
+        } else {
+            dismiss()
+        }
+    }
+
     private func reconnect() {
         terminal?.stop()
         terminal = nil
@@ -290,7 +311,7 @@ struct TerminalScreen: View {
         }
         // `env` injects Homebrew onto PATH; `exec` replaces the shell so a
         // clean tmux detach closes the channel.
-        let command = "exec env \(TmuxService.pathPrefix) tmux attach -t \(TmuxService.quote(session.name))"
+        let command = "exec env \(TmuxService.pathPrefix) tmux attach -t \(TmuxService.quote(sessionName))"
         terminal = TerminalSession(config: model.config, credential: credential, startupCommand: command)
     }
 }

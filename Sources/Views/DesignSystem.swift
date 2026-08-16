@@ -200,15 +200,26 @@ struct HostChip: View {
 /// One cap in the terminal's key rail. Caps share the rail width evenly —
 /// don't give them differing layout priorities, or the higher-priority caps
 /// take the full width and starve the rest to nothing.
+///
+/// Pass `stretches: false` at iPad width, where a rail of five full-width
+/// slabs would read as a toolbar; the cap then sits at a comfortable tap
+/// width and the rail keeps the leftover space.
 struct KeyCap: View {
     let label: String
     /// Spoken label, when the glyph on the cap isn't pronounceable.
     var spoken: String?
+    var stretches: Bool = true
     let action: () -> Void
 
-    init(_ label: String, spoken: String? = nil, action: @escaping () -> Void) {
+    init(
+        _ label: String,
+        spoken: String? = nil,
+        stretches: Bool = true,
+        action: @escaping () -> Void
+    ) {
         self.label = label
         self.spoken = spoken
+        self.stretches = stretches
         self.action = action
     }
 
@@ -219,7 +230,9 @@ struct KeyCap: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .foregroundStyle(Theme.textSecondary)
-                .frame(maxWidth: .infinity)
+                .padding(.horizontal, stretches ? 0 : 14)
+                .frame(maxWidth: stretches ? .infinity : nil)
+                .frame(minWidth: stretches ? nil : 62)
                 .frame(height: 34)
                 .background(
                     RoundedRectangle(cornerRadius: Theme.Radius.key, style: .continuous)
@@ -227,6 +240,7 @@ struct KeyCap: View {
                 )
         }
         .buttonStyle(.plain)
+        .hoverEffect(.lift)
         .accessibilityLabel(spoken ?? label)
     }
 }
@@ -258,10 +272,30 @@ extension View {
 
 /// Row-press feedback for list rows that are plain buttons (so they don't get
 /// the system disclosure chevron a `NavigationLink` would add).
+///
+/// `isSelected` is the split view's persistent selection (iPad only): the row
+/// keeps the pressed fill and gains a blue leading rail, so the sidebar shows
+/// which session the detail column is attached to.
 struct RowButtonStyle: ButtonStyle {
+    var isSelected: Bool = false
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .contentShape(Rectangle())
-            .background(configuration.isPressed ? Theme.surface : Color.clear)
+            .background(configuration.isPressed || isSelected ? Theme.surface : Color.clear)
+            .overlay(alignment: .leading) {
+                if isSelected {
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 0,
+                        bottomLeadingRadius: 0,
+                        bottomTrailingRadius: 2,
+                        topTrailingRadius: 2,
+                        style: .continuous
+                    )
+                    .fill(Theme.link)
+                    .frame(width: 3)
+                    .padding(.vertical, 4)
+                }
+            }
     }
 }

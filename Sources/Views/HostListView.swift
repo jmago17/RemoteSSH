@@ -17,6 +17,7 @@ struct HostListView: View {
                         hostRow(host)
                     }
                     .buttonStyle(.plain)
+                    .hoverEffect(.highlight)
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
                             model.deleteHost(host.id)
@@ -52,6 +53,7 @@ struct HostListView: View {
                     Image(systemName: "plus")
                 }
                 .accessibilityLabel("Add Host")
+                .keyboardShortcut("n", modifiers: .command)
             }
         }
         .overlay {
