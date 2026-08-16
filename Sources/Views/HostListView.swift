@@ -9,43 +9,41 @@ struct HostListView: View {
 
     var body: some View {
         List {
-            ForEach(model.hosts) { host in
-                Button {
-                    model.selectHost(host.id)
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(host.name.isEmpty ? host.host : host.name)
-                                .font(.headline)
-                                .foregroundStyle(.primary)
-                            Text("\(host.username)@\(host.host):\(host.port)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if host.id == model.config.id {
-                            Image(systemName: "checkmark")
-                                .foregroundStyle(.tint)
-                                .fontWeight(.semibold)
-                        }
-                    }
-                }
-                .swipeActions(edge: .trailing) {
-                    Button(role: .destructive) {
-                        model.deleteHost(host.id)
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
+            Section {
+                ForEach(model.hosts) { host in
                     Button {
-                        editingHost = host
+                        model.selectHost(host.id)
                     } label: {
-                        Label("Edit", systemImage: "pencil")
+                        hostRow(host)
                     }
-                    .tint(.blue)
+                    .buttonStyle(.plain)
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            model.deleteHost(host.id)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                        Button {
+                            editingHost = host
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        .tint(Theme.surfaceRaised)
+                    }
                 }
+            } header: {
+                SectionHeaderText("Saved")
+            } footer: {
+                Text("Tap a host to make it active — the session list reloads against it. Swipe to edit or delete.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textTertiary)
             }
+            .listRowBackground(Theme.surface)
         }
+        .phosphorForm()
         .navigationTitle("Hosts")
+        .navigationBarTitleDisplayMode(.inline)
+        .phosphorNavigationBar()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -65,7 +63,10 @@ struct HostListView: View {
                 } actions: {
                     Button("Add Host") { addingHost = true }
                         .buttonStyle(.borderedProminent)
+                        .tint(Theme.live)
+                        .foregroundStyle(Theme.onLive)
                 }
+                .background(Theme.bg)
             }
         }
         .sheet(item: $editingHost) { host in
@@ -74,5 +75,37 @@ struct HostListView: View {
         .sheet(isPresented: $addingHost) {
             HostEditorView(model: model, host: nil)
         }
+    }
+
+    private func hostRow(_ host: SSHConnectionConfig) -> some View {
+        let isActive = host.id == model.config.id
+        return HStack(spacing: 12) {
+            SessionTile(
+                name: host.name.isEmpty ? host.host : host.name,
+                isAttached: isActive,
+                size: 36,
+                punchOut: Theme.surface,
+                showsPresence: false
+            )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(host.name.isEmpty ? host.host : host.name)
+                    .font(.system(size: 14.5))
+                    .foregroundStyle(Theme.text)
+                Text("\(host.username)@\(host.host):\(host.port)")
+                    .font(.mono(11))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+
+            Spacer(minLength: 8)
+
+            if isActive {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Theme.live)
+            }
+        }
+        .padding(.vertical, 3)
+        .contentShape(Rectangle())
     }
 }

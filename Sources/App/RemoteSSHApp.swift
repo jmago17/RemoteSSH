@@ -8,6 +8,10 @@ struct RemoteSSHApp: App {
     var body: some Scene {
         WindowGroup {
             SessionListView(model: model)
+                // The identity is a dark, terminal-native one end to end —
+                // the attach view is a real terminal, not a themed surface.
+                .preferredColorScheme(.dark)
+                .tint(Theme.link)
                 .task {
                     // Wire notifications: taps/links open a session; ntfy
                     // messages become iOS notifications.

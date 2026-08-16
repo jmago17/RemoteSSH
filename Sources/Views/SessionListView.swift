@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The "chat list": one row per tmux session.
+/// The "chat list": one row per tmux session, with the active host's identity
+/// sitting under the title as the way into Settings.
 struct SessionListView: View {
     @Bindable var model: SessionListModel
     @State private var showingSettings = false
@@ -22,19 +23,13 @@ struct SessionListView: View {
                     sessionList
                 }
             }
+            .background(Theme.bg)
             .navigationDestination(for: TmuxSession.self) { session in
                 TerminalScreen(session: session, model: model)
             }
             .navigationTitle("Sessions")
+            .phosphorNavigationBar(opaque: false)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showingSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel("Settings")
-                }
                 if model.isConfigured {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -64,15 +59,30 @@ struct SessionListView: View {
                             } label: {
                                 Label("Wake Display", systemImage: "sun.max")
                             }
+                            Divider()
+                            Button {
+                                showingSettings = true
+                            } label: {
+                                Label("Settings", systemImage: "gearshape")
+                            }
                         } label: {
-                            Image(systemName: "ellipsis.circle")
+                            Image(systemName: "ellipsis")
                         }
                         .accessibilityLabel("More")
+                    }
+                } else {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showingSettings = true
+                        } label: {
+                            Image(systemName: "gearshape")
+                        }
+                        .accessibilityLabel("Settings")
                     }
                 }
                 if model.isRefreshing {
                     ToolbarItem(placement: .topBarLeading) {
-                        ProgressView()
+                        ProgressView().tint(Theme.textTertiary)
                     }
                 }
             }
@@ -104,6 +114,7 @@ struct SessionListView: View {
                 }
             }
         }
+        .tint(Theme.link)
         .task {
             model.reloadConfig()
             model.startPolling()
@@ -121,17 +132,36 @@ struct SessionListView: View {
 
     private var sessionList: some View {
         List {
-            if let error = model.errorMessage {
-                Section {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                        .font(.footnote)
-                }
+            Button {
+                showingSettings = true
+            } label: {
+                HostChip(label: hostLabel, isConnected: model.errorMessage == nil)
             }
+            .buttonStyle(.plain)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
+
+            if let error = model.errorMessage {
+                errorBanner(error)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
+            }
+
             ForEach(model.sessions) { session in
-                NavigationLink(value: session) {
+                // A plain button rather than a NavigationLink: the row carries
+                // its own trailing unread dot, so the system disclosure
+                // chevron would be noise.
+                Button {
+                    path.append(session)
+                } label: {
                     SessionRowView(session: session)
                 }
+                .buttonStyle(RowButtonStyle())
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
+                .listRowSeparatorTint(Theme.hairline)
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) {
                         Task { await model.kill(session.name) }
@@ -144,12 +174,38 @@ struct SessionListView: View {
                     } label: {
                         Label("Rename", systemImage: "pencil")
                     }
-                    .tint(.blue)
+                    .tint(Theme.surfaceRaised)
                 }
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Theme.bg)
         .refreshable { await model.refresh() }
+    }
+
+    private func errorBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.warn)
+                .padding(.top, 1)
+            Text(message)
+                .font(.mono(11.5))
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous)
+                .fill(Theme.warn.opacity(0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous)
+                .stroke(Theme.warn.opacity(0.26), lineWidth: 1)
+        )
     }
 
     @ViewBuilder
@@ -158,15 +214,18 @@ struct SessionListView: View {
             ContentUnavailableView {
                 Label("Connection Problem", systemImage: "exclamationmark.triangle")
             } description: {
-                Text(error)
+                Text(error).font(.mono(12))
             } actions: {
                 if model.config.canWakeOnLAN {
                     Button("Wake Mac") { model.wakeOnLAN() }
                         .buttonStyle(.borderedProminent)
+                        .tint(Theme.live)
+                        .foregroundStyle(Theme.onLive)
                 }
                 Button("Retry") { Task { await model.refresh() } }
                 Button("Settings") { showingSettings = true }
             }
+            .tint(Theme.link)
         } else {
             ContentUnavailableView {
                 Label("No Sessions", systemImage: "bubble.left.and.bubble.right")
@@ -175,8 +234,11 @@ struct SessionListView: View {
             } actions: {
                 Button("Restore Saved Sessions") { Task { await model.restoreSessions() } }
                     .buttonStyle(.borderedProminent)
+                    .tint(Theme.live)
+                    .foregroundStyle(Theme.onLive)
                 Button("Refresh") { Task { await model.refresh() } }
             }
+            .tint(Theme.link)
         }
     }
 
@@ -188,7 +250,16 @@ struct SessionListView: View {
         } actions: {
             Button("Open Settings") { showingSettings = true }
                 .buttonStyle(.borderedProminent)
+                .tint(Theme.live)
+                .foregroundStyle(Theme.onLive)
         }
+        .tint(Theme.link)
+    }
+
+    private var hostLabel: String {
+        let config = model.config
+        guard config.isComplete else { return "No host configured" }
+        return "\(config.username)@\(config.host)"
     }
 
     private var renameBinding: Binding<Bool> {

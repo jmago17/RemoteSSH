@@ -11,6 +11,17 @@ struct TerminalHostView: UIViewRepresentable {
         let terminalView = TerminalView(frame: .zero)
         terminalView.terminalDelegate = context.coordinator
         terminalView.font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        // Match the emulator's own canvas to the app's terminal surface so the
+        // view reads as part of the screen rather than a pasted-in black box.
+        terminalView.nativeBackgroundColor = Theme.terminalBGUI
+        terminalView.nativeForegroundColor = Theme.textUI
+        terminalView.caretColor = Theme.liveUI
+        terminalView.backgroundColor = Theme.terminalBGUI
+        // Suppress SwiftTerm's own built-in keyboard accessory row (esc/ctrl/
+        // arrows/symbols) -- it duplicates our themed KeyCap rail in
+        // TerminalScreen's toolbar, stacking two shortcut rows above the
+        // keyboard. Keep only the custom one.
+        terminalView.inputAccessoryView = nil
         context.coordinator.terminalView = terminalView
 
         // Feed host output into the emulator (called on the main actor).

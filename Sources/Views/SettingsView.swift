@@ -16,21 +16,28 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Connection") {
+                Section {
                     NavigationLink {
                         HostListView(model: model)
                     } label: {
                         LabeledContent("Hosts") {
-                            Text(activeHostLabel).foregroundStyle(.secondary)
+                            Text(activeHostLabel)
+                                .font(.mono(13.5))
+                                .foregroundStyle(Theme.textSecondary)
                         }
                     }
+                } header: {
+                    SectionHeaderText("Connection")
                 }
+                .listRowBackground(Theme.surface)
 
                 Section {
                     Toggle("Notifications", isOn: $notificationsEnabled)
+                        .tint(Theme.live)
                     if notificationsEnabled {
                         LabeledContent("ntfy Server") {
                             TextField("https://ntfy.sh", text: $ntfyServer)
+                                .font(.mono(13.5))
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                                 .keyboardType(.URL)
@@ -38,32 +45,46 @@ struct SettingsView: View {
                         }
                         LabeledContent("Topic") {
                             TextField("your-private-topic", text: $ntfyTopic)
+                                .font(.mono(13.5))
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                                 .multilineTextAlignment(.trailing)
                         }
                     }
                 } header: {
-                    Text("Notifications")
+                    SectionHeaderText("Notifications")
                 } footer: {
                     Text("Get pushed when a session needs attention. Run scripts/tmux-notify.sh on your Mac and subscribe to the same private topic here (and in the ntfy app for background pushes). Pick a hard-to-guess topic — anyone with it can send you notifications.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary)
                 }
+                .listRowBackground(Theme.surface)
 
-                Section("Polling") {
-                    VStack(alignment: .leading) {
-                        Text("Refresh every \(Int(interval))s")
-                        Slider(value: $interval, in: 2...60, step: 1)
+                Section {
+                    LabeledContent("Refresh") {
+                        Text("every \(Int(interval))s")
+                            .font(.mono(13.5))
+                            .foregroundStyle(Theme.textSecondary)
                     }
+                    Slider(value: $interval, in: 2...60, step: 1)
+                        .tint(Theme.live)
+                } header: {
+                    SectionHeaderText("Polling")
                 }
+                .listRowBackground(Theme.surface)
             }
+            .phosphorForm()
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .phosphorNavigationBar()
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { save(); dismiss() }
+                        .fontWeight(.semibold)
                 }
             }
         }
+        .tint(Theme.link)
         .onAppear {
             interval = model.pollInterval
             notificationsEnabled = store.notificationsEnabled
