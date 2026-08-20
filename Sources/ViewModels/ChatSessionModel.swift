@@ -21,6 +21,13 @@ final class ChatSessionModel {
     private(set) var isSending = false
     private(set) var errorMessage: String?
 
+    /// The AI-generated recap of what Claude Code just concluded, shown once
+    /// it goes from working to idle. `nil` before anything has finished,
+    /// cleared again the moment a new command starts.
+    private(set) var conclusionSummary: ClaudeCodeSummariser.ConclusionSummary?
+    private(set) var isSummarising = false
+    private(set) var summaryError: String?
+
     /// What the user is typing in the composer.
     var draft = ""
 
@@ -36,6 +43,19 @@ final class ChatSessionModel {
     /// How much scrollback to ask for. 2000 lines is what `captureScrollback`
     /// has always defaulted to and is plenty for a reading view.
     private let scrollbackLines = 2000
+
+    /// The Claude Code activity from the *previous* refresh, so a fresh
+    /// refresh can tell a `working → idle` transition apart from "still
+    /// idle" or "still working" — only the transition should trigger a
+    /// summary, not every idle poll afterwards.
+    private var previousActivity: ClaudeCodeStatus.Activity?
+
+    /// Live-updates the banner while Claude Code is working. `ChatScreen` has
+    /// no equivalent of `SessionListModel`'s list poller — without this, a
+    /// command that finishes between manual refreshes (returning from the
+    /// terminal, reopening the screen) shows stale "working" state until the
+    /// user does something that happens to trigger a reload.
+    private var pollTask: Task<Void, Never>?
 
     init(sessionName: String, config: SSHConnectionConfig) {
         self.sessionName = sessionName
@@ -80,11 +100,78 @@ final class ChatSessionModel {
             // Parsing a couple of thousand lines is real work; `parsed` is
             // `@concurrent`, so it happens off the main actor and only the
             // finished value comes back here.
-            transcript = await TranscriptParser.parsed(snapshot)
+            let parsed = await TranscriptParser.parsed(snapshot)
+            transcript = parsed
             errorMessage = nil
             pendingCommand = nil
+            handleActivityChange(parsed.claudeCode?.activity)
         } catch {
             errorMessage = friendly(error)
+        }
+    }
+
+    // MARK: Claude Code — live status + conclusion summary
+
+    /// Starts a light poll purely to keep the Claude Code banner honest while
+    /// it's working. Call when the screen appears; `stopWatching` cancels it
+    /// when the screen goes away (leaving one poller alive per open chat
+    /// screen would multiply SSH round trips for no benefit once the user has
+    /// navigated elsewhere).
+    func startWatchingClaudeCode() {
+        guard pollTask == nil else { return }
+        pollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled else { return }
+                guard let self else { return }
+                // Only worth the round trip if this really is a Claude Code
+                // session that's actively doing something — an idle session,
+                // or any ordinary shell, has nothing that changes between the
+                // user's own refreshes.
+                guard case .working = self.transcript.claudeCode?.activity else { continue }
+                await self.refresh()
+            }
+        }
+    }
+
+    func stopWatchingClaudeCode() {
+        pollTask?.cancel()
+        pollTask = nil
+    }
+
+    /// Fires the summary exactly on a `working → idle` edge. Re-entering an
+    /// already-idle session, or polling while still working, must not
+    /// re-trigger it — otherwise leaving and reopening a finished session
+    /// would re-summarise every time.
+    private func handleActivityChange(_ activity: ClaudeCodeStatus.Activity?) {
+        defer { previousActivity = activity }
+
+        guard case .working = previousActivity, case .idle = activity else {
+            // A fresh command (idle → working, or working → working with a
+            // new task) invalidates whatever the last summary was about.
+            if case .working = activity, conclusionSummary != nil {
+                conclusionSummary = nil
+                summaryError = nil
+            }
+            return
+        }
+
+        guard let conclusion = ClaudeCodeRecogniser.lastConclusion(text: transcript.turns.first?.text ?? "") else {
+            return
+        }
+
+        Task { [weak self] in await self?.summarise(conclusion) }
+    }
+
+    private func summarise(_ conclusion: String) async {
+        isSummarising = true
+        summaryError = nil
+        defer { isSummarising = false }
+        do {
+            conclusionSummary = try await ClaudeCodeSummariser.summarise(conclusion)
+        } catch {
+            conclusionSummary = nil
+            summaryError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
@@ -112,8 +199,10 @@ final class ChatSessionModel {
                 config: config,
                 credential: credential
             )
-            transcript = await TranscriptParser.parsed(snapshot)
+            let parsed = await TranscriptParser.parsed(snapshot)
+            transcript = parsed
             errorMessage = nil
+            handleActivityChange(parsed.claudeCode?.activity)
         } catch {
             errorMessage = friendly(error)
             // Give the command back rather than swallowing it.

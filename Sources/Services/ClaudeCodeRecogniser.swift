@@ -158,4 +158,79 @@ enum ClaudeCodeRecogniser {
         let value = String(s[r]).trimmingCharacters(in: .whitespaces)
         return value.isEmpty ? nil : value
     }
+
+    // MARK: - Conclusion extraction
+
+    /// Pulls out whatever Claude Code said right before it went idle — the
+    /// text most likely to be "here's what I found/did", which is what
+    /// `ClaudeCodeSummariser` reads.
+    ///
+    /// Heuristic like the rest of this file, and cheap on purpose: take
+    /// everything from the *last* `⏺` marker (a new turn) down to the
+    /// mode-bar / composer separator at the bottom, and drop the tool-call
+    /// noise lines (`Running N shell command…`, `⎿  ...`) that are process,
+    /// not conclusion. If no `⏺` is found, falls back to the last non-empty,
+    /// non-chrome lines — better than nothing, worse than a real marker.
+    static func lastConclusion(text: String, maxLines: Int = 40) -> String? {
+        let lines = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+
+        guard let markerIndex = lines.lastIndex(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("⏺") }) else {
+            return fallbackTail(lines, maxLines: maxLines)
+        }
+
+        let kept = dropProcessNoise(Array(lines[markerIndex...]))
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        let joined = kept.joined(separator: "\n")
+        return joined.isEmpty ? nil : joined
+    }
+
+    /// Drops tool-call chrome from a block of lines: `Running N shell
+    /// command…`, its `⎿` result line, *and* that result's wrapped
+    /// continuations. A continuation doesn't carry its own `⎿` marker — it's
+    /// just more-indented text — so this tracks indentation rather than
+    /// testing each line alone. Getting this wrong would staple a fragment
+    /// like `atforms/iPhoneOS.platform/...` (the tail of a path Claude Code
+    /// itself wrapped as `Pl` + `atforms`) onto the conclusion as if it were
+    /// prose.
+    private static func dropProcessNoise(_ lines: [String]) -> [String] {
+        var kept: [String] = []
+        var skippingBlockIndent: Int? = nil
+
+        for raw in lines {
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            let indent = raw.prefix(while: { $0 == " " }).count
+
+            if let blockIndent = skippingBlockIndent {
+                if trimmed.isEmpty { skippingBlockIndent = nil; continue }
+                if indent >= blockIndent { continue } // still inside the quoted block
+                skippingBlockIndent = nil // dedented back out — fall through and test normally
+            }
+
+            if trimmed.isEmpty { kept.append(raw); continue }
+            if matches(trimmed, pattern: #"^Running \d+ shell command"#) { continue }
+            if trimmed.hasPrefix("⎿") {
+                skippingBlockIndent = indent
+                continue
+            }
+            if trimmed.hasPrefix("─") || trimmed.hasPrefix("❯") { continue }
+            if trimmed.contains("auto mode on") || trimmed.contains("esc to interrupt") { continue }
+            if trimmed.hasPrefix("Tip:") { continue }
+            kept.append(raw)
+        }
+        return kept
+    }
+
+    private static func fallbackTail(_ lines: [String], maxLines: Int) -> String? {
+        let kept = dropProcessNoise(lines)
+            .suffix(maxLines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let joined = kept.joined(separator: "\n")
+        return joined.isEmpty ? nil : joined
+    }
 }

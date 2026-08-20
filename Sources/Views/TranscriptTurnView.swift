@@ -101,16 +101,28 @@ struct TranscriptTurnView: View {
             VStack(alignment: .leading, spacing: 0) {
                 // Horizontal scrolling rather than wrapping: a wrapped build log
                 // or `ls -l` loses the column structure that makes it readable.
+                //
+                // The `maxWidth: .infinity` belongs on the ScrollView, not on
+                // the Text inside it. Putting it on the Text — as this used to
+                // do — proposes an unbounded width to something already inside
+                // an unbounded scroll axis, and iPhone vs iPad resolve that
+                // ambiguity in opposite directions: the block either overflows
+                // past the screen edge (iPhone, nothing visible) or collapses
+                // to its content width and leaves a gap (iPad). `fixedSize`
+                // gives the text its true intrinsic width so the scroll view
+                // has something concrete to scroll, and the outer frame is
+                // what actually claims the available column width.
                 ScrollView(.horizontal, showsIndicators: true) {
                     Text(visibleText)
                         .font(.mono(12.5))
                         .foregroundStyle(Theme.text.opacity(0.92))
                         .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 12)
                         .padding(.top, 10)
                         .padding(.bottom, isTruncated ? 8 : 10)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 if isTruncated || isExpanded {
                     expandFooter
