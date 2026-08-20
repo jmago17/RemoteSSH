@@ -51,6 +51,7 @@ struct ChatScreen: View {
                 chat = ChatSessionModel(sessionName: sessionName, config: model.config)
             }
             await chat?.refresh()
+            chat?.startWatchingClaudeCode()
         }
         // The terminal is a *mode*, not a sibling screen: you drop into it,
         // do the interactive thing, and come back. A cover says that plainly,
@@ -63,6 +64,13 @@ struct ChatScreen: View {
             // Back from the terminal: the user has almost certainly run
             // something there, so the transcript is stale.
             if !isShowing { Task { await chat?.refresh() } }
+        }
+        .onDisappear {
+            // One poller per open chat screen is enough; leaving the screen
+            // (back, tab switch, terminal cover doesn't count — that's a
+            // sheet, not a disappearance) stops it so it doesn't keep polling
+            // a session nobody's looking at.
+            chat?.stopWatchingClaudeCode()
         }
     }
 
@@ -152,7 +160,12 @@ struct ChatScreen: View {
                 LazyVStack(alignment: .leading, spacing: 13) {
                     if let claude = chat.transcript.claudeCode {
                         ClaudeCodeBanner(status: claude) { showingTerminal = true }
-                            .padding(.bottom, 2)
+                        ClaudeCodeConclusionCard(
+                            summary: chat.conclusionSummary,
+                            isSummarising: chat.isSummarising,
+                            errorMessage: chat.summaryError
+                        )
+                        .padding(.bottom, 2)
                     } else if let fallback = chat.transcript.fallback {
                         FallbackNote(fallback: fallback) { showingTerminal = true }
                             .padding(.bottom, 2)
@@ -268,6 +281,18 @@ struct ChatScreen: View {
                     .onSubmit { submit(chat) }
                     .submitLabel(.send)
                     .disabled(chat.isSending)
+                    .toolbar {
+                        // TextField's own Return key sends the command via
+                        // onSubmit rather than dismissing — there was no way
+                        // to put the keyboard away without touching the pane
+                        // below it (which itself scrolls under the keyboard).
+                        // A standard keyboard-toolbar Done button fixes that.
+                        ToolbarItemGroup(placement: .keyboard) {
+                            Spacer()
+                            Button("Done") { composerFocused = false }
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                    }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
