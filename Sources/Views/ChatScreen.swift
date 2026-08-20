@@ -278,12 +278,22 @@ struct ChatScreen: View {
                     .stroke(composerFocused ? Theme.link.opacity(0.55) : Theme.hairline, lineWidth: 1)
             )
 
+            // While something is running, the send button *becomes* the stop
+            // button. Ctrl-C is only meaningful during that window, and a
+            // permanent second button would be dead weight the rest of the
+            // time. Same position, so the thumb is already there.
             Button {
-                submit(chat)
+                if chat.isSending {
+                    Task { await chat.interrupt() }
+                } else {
+                    submit(chat)
+                }
             } label: {
                 Group {
                     if chat.isSending {
-                        ProgressView().tint(Theme.textTertiary)
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Theme.warn)
                     } else {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 15, weight: .bold))
@@ -291,11 +301,21 @@ struct ChatScreen: View {
                     }
                 }
                 .frame(width: 38, height: 38)
-                .background(Circle().fill(chat.canSend ? Theme.live : Theme.surfaceRaised))
+                .background(
+                    Circle().fill(
+                        chat.isSending
+                            ? Theme.warn.opacity(0.16)
+                            : (chat.canSend ? Theme.live : Theme.surfaceRaised)
+                    )
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Theme.warn.opacity(chat.isSending ? 0.5 : 0), lineWidth: 1)
+                )
             }
             .buttonStyle(.plain)
-            .disabled(!chat.canSend)
-            .accessibilityLabel("Send command")
+            .disabled(!chat.canSend && !chat.isSending)
+            .accessibilityLabel(chat.isSending ? "Stop the running command" : "Send command")
         }
         .padding(.horizontal, isRegular ? 22 : 12)
         .padding(.top, 9)
