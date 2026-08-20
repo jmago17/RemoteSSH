@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import CryptoKit
 
 /// Drives one session's conversational view: pulls the pane, parses it into
 /// turns, and sends commands back.
@@ -21,9 +22,12 @@ final class ChatSessionModel {
     private(set) var isSending = false
     private(set) var errorMessage: String?
 
-    /// The AI-generated recap of what Claude Code just concluded, shown once
-    /// it goes from working to idle. `nil` before anything has finished,
-    /// cleared again the moment a new command starts.
+    /// The AI-generated recap of what Claude Code just concluded. Populated
+    /// whenever a fresh, not-yet-summarised conclusion is idle in the pane —
+    /// including on the very first `refresh()` of a screen that just opened
+    /// on an already-idle session, which is the common case. `nil` before
+    /// anything has been summarised, cleared again the moment a new command
+    /// starts.
     private(set) var conclusionSummary: ClaudeCodeSummariser.ConclusionSummary?
     private(set) var isSummarising = false
     private(set) var summaryError: String?
@@ -43,12 +47,6 @@ final class ChatSessionModel {
     /// How much scrollback to ask for. 2000 lines is what `captureScrollback`
     /// has always defaulted to and is plenty for a reading view.
     private let scrollbackLines = 2000
-
-    /// The Claude Code activity from the *previous* refresh, so a fresh
-    /// refresh can tell a `working → idle` transition apart from "still
-    /// idle" or "still working" — only the transition should trigger a
-    /// summary, not every idle poll afterwards.
-    private var previousActivity: ClaudeCodeStatus.Activity?
 
     /// Live-updates the banner while Claude Code is working. `ChatScreen` has
     /// no equivalent of `SessionListModel`'s list poller — without this, a
@@ -104,7 +102,7 @@ final class ChatSessionModel {
             transcript = parsed
             errorMessage = nil
             pendingCommand = nil
-            handleActivityChange(parsed.claudeCode?.activity)
+            summariseIfNewConclusion(parsed.claudeCode?.activity)
         } catch {
             errorMessage = friendly(error)
         }
@@ -139,39 +137,100 @@ final class ChatSessionModel {
         pollTask = nil
     }
 
-    /// Fires the summary exactly on a `working → idle` edge. Re-entering an
-    /// already-idle session, or polling while still working, must not
-    /// re-trigger it — otherwise leaving and reopening a finished session
-    /// would re-summarise every time.
-    private func handleActivityChange(_ activity: ClaudeCodeStatus.Activity?) {
-        defer { previousActivity = activity }
-
-        guard case .working = previousActivity, case .idle = activity else {
-            // A fresh command (idle → working, or working → working with a
-            // new task) invalidates whatever the last summary was about.
+    /// Fires the summary when Claude Code is idle *and* its conclusion hasn't
+    /// already been summarised. A content digest — not a working→idle edge —
+    /// is the right test: the edge only fires if the app was open and this
+    /// exact `ChatSessionModel` instance witnessed the transition, so opening
+    /// the app after Claude Code finished unattended (the actual common case)
+    /// never triggered anything. A persisted digest instead answers "have I
+    /// summarised *this text* already", which is true whether the user saw
+    /// the transition, missed it, or the app was relaunched entirely.
+    private func summariseIfNewConclusion(_ activity: ClaudeCodeStatus.Activity?) {
+        guard case .idle = activity else {
+            // A fresh command invalidates whatever the last summary was about.
             if case .working = activity, conclusionSummary != nil {
                 conclusionSummary = nil
                 summaryError = nil
             }
             return
         }
+        guard !isSummarising,
+              let conclusion = ClaudeCodeRecogniser.lastConclusion(text: transcript.turns.first?.text ?? "")
+        else { return }
 
-        guard let conclusion = ClaudeCodeRecogniser.lastConclusion(text: transcript.turns.first?.text ?? "") else {
+        let digest = Self.digest(of: conclusion)
+        if digest == Self.lastSummarisedDigest(for: sessionName) {
+            // Already summarised this exact conclusion — but if the app was
+            // relaunched since, conclusionSummary starts nil and the card
+            // would otherwise vanish on every reopen of an already-seen
+            // session. Restore the cached card instead of regenerating it:
+            // FoundationModels isn't deterministic, so regenerating would
+            // also silently change the wording each time, which reads as a
+            // bug, not as "nothing new happened".
+            if conclusionSummary == nil {
+                conclusionSummary = Self.cachedSummary(for: sessionName)
+            }
             return
         }
 
-        Task { [weak self] in await self?.summarise(conclusion) }
+        Task { [weak self] in await self?.summarise(conclusion, digest: digest) }
     }
 
-    private func summarise(_ conclusion: String) async {
+    private func summarise(_ conclusion: String, digest: String) async {
         isSummarising = true
         summaryError = nil
         defer { isSummarising = false }
         do {
-            conclusionSummary = try await ClaudeCodeSummariser.summarise(conclusion)
+            let summary = try await ClaudeCodeSummariser.summarise(conclusion)
+            conclusionSummary = summary
+            // Persisted only on success: if this failed (Apple Intelligence
+            // still downloading, device unsupported), the next refresh must
+            // retry rather than remember a failure as "already summarised".
+            Self.saveSummarisedDigest(digest, summary: summary, for: sessionName)
         } catch {
             conclusionSummary = nil
             summaryError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    // MARK: Digest persistence (device-local, deliberately NOT SettingsStore)
+
+    /// "Have I already summarised this session's current conclusion" is a
+    /// per-device cache fact, not a user preference — it must not sync via
+    /// iCloud KVS (two devices legitimately want independent state here,
+    /// same as `HostKeyValidator`'s TOFU trust, which uses this same plain
+    /// `UserDefaults.standard` pattern rather than `SettingsStore`).
+    ///
+    /// Swift's `Hasher` is seeded per-process — `hashValue` on a String is
+    /// **not stable across launches** and must never be persisted. SHA-256
+    /// is the deterministic equivalent.
+    private static func digest(of text: String) -> String {
+        let normalised = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return SHA256.hash(data: Data(normalised.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    private static func digestKey(for session: String) -> String { "claudeConclusionDigest.\(session)" }
+    private static func summaryKey(for session: String) -> String { "claudeConclusionSummary.\(session)" }
+
+    private static func lastSummarisedDigest(for session: String) -> String? {
+        UserDefaults.standard.string(forKey: digestKey(for: session))
+    }
+
+    private static func cachedSummary(for session: String) -> ClaudeCodeSummariser.ConclusionSummary? {
+        guard let data = UserDefaults.standard.data(forKey: summaryKey(for: session)) else { return nil }
+        return try? JSONDecoder().decode(ClaudeCodeSummariser.ConclusionSummary.self, from: data)
+    }
+
+    private static func saveSummarisedDigest(
+        _ digest: String,
+        summary: ClaudeCodeSummariser.ConclusionSummary,
+        for session: String
+    ) {
+        UserDefaults.standard.set(digest, forKey: digestKey(for: session))
+        if let data = try? JSONEncoder().encode(summary) {
+            UserDefaults.standard.set(data, forKey: summaryKey(for: session))
         }
     }
 
@@ -202,7 +261,7 @@ final class ChatSessionModel {
             let parsed = await TranscriptParser.parsed(snapshot)
             transcript = parsed
             errorMessage = nil
-            handleActivityChange(parsed.claudeCode?.activity)
+            summariseIfNewConclusion(parsed.claudeCode?.activity)
         } catch {
             errorMessage = friendly(error)
             // Give the command back rather than swallowing it.
