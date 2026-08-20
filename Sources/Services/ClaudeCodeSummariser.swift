@@ -29,7 +29,7 @@ enum ClaudeCodeSummariser {
     /// reads better for the specific conclusion — a guided type rather than
     /// parsed markdown, so there's no "did it forget to bullet one line" risk.
     @Generable(description: "A short, skimmable summary of what an AI coding assistant just reported, for someone glancing at their phone.")
-    struct ConclusionSummary {
+    struct ConclusionSummary: Codable {
         @Guide(description: "One short sentence capturing the essence of what was reported. Plain text, no markdown, no trailing period is fine either way.")
         var headline: String
 
