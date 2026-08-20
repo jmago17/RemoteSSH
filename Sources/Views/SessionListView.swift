@@ -83,7 +83,9 @@ struct SessionListView: View {
         NavigationStack(path: stackPath) {
             sidebar
                 .navigationDestination(for: String.self) { name in
-                    TerminalScreen(sessionName: name, model: model)
+                    // The conversation is the default way in; the terminal
+                    // itself is one tap away from inside it.
+                    ChatScreen(sessionName: name, model: model)
                 }
         }
     }
@@ -100,9 +102,9 @@ struct SessionListView: View {
         } detail: {
             NavigationStack {
                 if let name = model.selectedSessionName {
-                    // A fresh identity per session so switching rows tears the
-                    // old PTY down and attaches the new one.
-                    TerminalScreen(sessionName: name, model: model)
+                    // A fresh identity per session so switching rows drops the
+                    // old transcript and reads the new session's pane.
+                    ChatScreen(sessionName: name, model: model)
                         .id(name)
                 } else {
                     NoSessionSelected(isConfigured: model.isConfigured)

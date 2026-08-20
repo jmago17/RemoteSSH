@@ -62,10 +62,111 @@ struct TmuxService {
         credential: SSHCredential
     ) async throws -> String {
         try await withShell(config: config, credential: credential) { shell in
-            try await shell.run(
-                "\(Self.pathPrefix) tmux capture-pane -p -t \(Self.quote(name)) -S -\(lines) 2>/dev/null || true"
+            try await shell.run(Self.captureCommand(session: name, lines: lines))
+        }
+    }
+
+    /// Scrollback *plus* the two facts about the pane that stop the transcript
+    /// parser from having to guess: whether a full-screen program owns the
+    /// screen, and which process is in the foreground.
+    ///
+    /// Both run over one connection — asking tmux costs a few bytes on a channel
+    /// that's already open, and it turns "is this vim?" from a heuristic into a
+    /// fact.
+    func capturePane(
+        session name: String,
+        lines: Int = 2000,
+        config: SSHConnectionConfig,
+        credential: SSHCredential
+    ) async throws -> PaneSnapshot {
+        try await withShell(config: config, credential: credential) { shell in
+            try await Self.snapshot(shell, session: name, lines: lines)
+        }
+    }
+
+    /// Types `command` into a session and presses Enter, then waits for the pane
+    /// to settle and returns what it looks like afterwards.
+    ///
+    /// There is no completion callback for `send-keys`, so the alternative to
+    /// waiting is a blind `sleep` — which truncates slow commands and wastes
+    /// time on fast ones. Instead this polls a cheap change signal
+    /// (`#{history_size} #{cursor_y}`, a few bytes) and captures once the signal
+    /// holds still, all on the same connection.
+    func sendCommand(
+        _ command: String,
+        to name: String,
+        lines: Int = 2000,
+        config: SSHConnectionConfig,
+        credential: SSHCredential
+    ) async throws -> PaneSnapshot {
+        try await withShell(config: config, credential: credential) { shell in
+            // `-l` is load-bearing, not decoration: without it tmux resolves the
+            // argument as a *key name* first, so a command that happens to read
+            // `Enter`, `Space` or `C-c` would be delivered as that keystroke
+            // instead of as text. Send the text literally, then Enter as its own
+            // key. `quote` handles the outer shell layer.
+            _ = try await shell.run(
+                "\(Self.pathPrefix) tmux send-keys -t \(Self.quote(name)) -l \(Self.quote(command)) 2>/dev/null || true"
+            )
+            _ = try await shell.run(
+                "\(Self.pathPrefix) tmux send-keys -t \(Self.quote(name)) Enter 2>/dev/null || true"
+            )
+
+            var previousSignal = ""
+            var stableRounds = 0
+            // ~6s ceiling: past that we show what there is rather than hang. A
+            // long build keeps printing and simply gets picked up by the next
+            // refresh.
+            for round in 0..<20 {
+                try await Task.sleep(for: .milliseconds(300))
+                let signal = try await shell.run(
+                    "\(Self.pathPrefix) tmux display-message -p -t \(Self.quote(name)) '#{history_size} #{cursor_y}' 2>/dev/null || true"
+                )
+                if signal == previousSignal {
+                    stableRounds += 1
+                    // Two quiet rounds after something moved. The first round is
+                    // never enough to conclude anything.
+                    if stableRounds >= 2 && round > 0 { break }
+                } else {
+                    stableRounds = 0
+                    previousSignal = signal
+                }
+            }
+
+            return try await Self.snapshot(shell, session: name, lines: lines)
+        }
+    }
+
+    /// Sends a bare control key (Ctrl-C and friends) without waiting — used to
+    /// get a wedged pane back to a prompt from the chat view.
+    func sendKeys(_ keys: String, to name: String, config: SSHConnectionConfig, credential: SSHCredential) async throws {
+        try await withShell(config: config, credential: credential) { shell in
+            _ = try await shell.run(
+                "\(Self.pathPrefix) tmux send-keys -t \(Self.quote(name)) \(Self.quote(keys)) 2>/dev/null || true"
             )
         }
+    }
+
+    /// `-J` joins lines that tmux wrapped at the pane width. Without it a long
+    /// command or a long output line arrives pre-split, and the continuations
+    /// look like new lines to the parser — which is exactly how an output ends
+    /// up attributed to the wrong command.
+    static func captureCommand(session name: String, lines: Int) -> String {
+        "\(pathPrefix) tmux capture-pane -p -J -t \(quote(name)) -S -\(lines) 2>/dev/null || true"
+    }
+
+    private static func snapshot(_ shell: RemoteShell, session name: String, lines: Int) async throws -> PaneSnapshot {
+        let text = try await shell.run(captureCommand(session: name, lines: lines))
+        let info = (try? await shell.run(
+            "\(pathPrefix) tmux display-message -p -t \(quote(name)) '#{alternate_on}|#{pane_current_command}' 2>/dev/null || true"
+        )) ?? ""
+
+        let parts = info.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "|", omittingEmptySubsequences: false)
+        return PaneSnapshot(
+            text: text,
+            alternateScreen: parts.first.map { $0 == "1" } ?? false,
+            currentCommand: parts.count > 1 ? String(parts[1]) : ""
+        )
     }
 
     func killSession(_ name: String, config: SSHConnectionConfig, credential: SSHCredential) async throws {

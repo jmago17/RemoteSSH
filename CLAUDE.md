@@ -139,3 +139,86 @@ desde Minis. Merece la pena leerlo al empezar.
   ahora un init basado en SF Symbols (`square.grid.2x2`, `chevron.down`).
 - **Homebrew no esta 
 
+
+## Vista conversacional (sesion 2026-08-20, rama `feature/chat-view`)
+
+Al tocar una sesion ya NO se cae en la terminal: se entra en `ChatScreen`, una
+lectura tipo chat del scrollback. La terminal sigue intacta, a un toque.
+
+**Ficheros nuevos**: `Services/TranscriptParser.swift`,
+`ViewModels/ChatSessionModel.swift`, `Views/ChatScreen.swift`,
+`Views/TranscriptTurnView.swift`.
+
+### Como se llega a la terminal: `fullScreenCover`, no un push
+
+`ChatScreen` presenta `TerminalScreen` con `.fullScreenCover`, no con
+`navigationDestination`. Razon: el `NavigationStack` de `SessionListView` tiene
+el path tipado a `[String]` (la seleccion va por NOMBRE por culpa del polling).
+Meter un segundo tipo de ruta obligaria a migrar a `NavigationPath` y tocar la
+navegacion, que es zona delicada. Ademas el cover da un punto inequivoco donde
+refrescar el transcript al volver (`onChange(of: showingTerminal)`).
+
+### El parser: en que se apoya y donde falla
+
+`tmux capture-pane -p` no marca nada. La firma del prompt se INFIERE de la
+ultima linea no vacia (el prompt vivo esperando input), no de regex genericas
+ni del prefijo comun (el prefijo comun falla: el cwd cambia entre prompts, asi
+que el prefijo literal suele ser la cadena vacia).
+
+- Ancla = ultimo caracter del prompt vivo. `❯ ➜ » λ` son *safe* (1 coincidencia
+  basta); `$ % # >` son *risky* (exigen pre-ancla no vacio, similitud ≥0.6 y
+  **3** coincidencias). Ese `3` es la proteccion real contra falsos positivos.
+- `similarity` compara **prefijo Y sufijo** y se queda con el mejor. Hace falta:
+  el cwd varia por el final, el `✘ 1` del exit code de p10k varia por el
+  principio. Solo con prefijo, los prompts con exit code no casaban.
+- **Se descarto el criterio de "densidad de prompts ≤40%"** que recomienda la
+  literatura: tumbaba las sesiones de comandos con salida corta (`echo a` da
+  50% de densidad y es perfectamente estructurable). Verificado con el arnes.
+- Si no hay confianza NO se inventan turnos: bloque `.raw` + nota que explica
+  por que. Degradacion tambien por bloque, no solo global.
+
+Fallara (asumido y documentado en el propio fichero): REPLs (`python3`, `psql`),
+shells anidados (`ssh otrohost`), continuaciones PS2 / heredocs, cambio de
+prompt a mitad de sesion (`source venv/bin/activate`), y salida que imita
+prompts (un `cat` de un tutorial con lineas `$ cmd`).
+
+### Detalles que costaron
+
+- **`tmux send-keys` SIN `-l` interpreta nombres de tecla**: un comando llamado
+  `Enter`, `Space` o `C-c` se enviaria como pulsacion, no como texto. Hay que
+  usar `send-keys -l '<texto>'` y luego `send-keys Enter` aparte.
+- **`capture-pane` necesita `-J`**: sin el, tmux parte las lineas al ancho del
+  pane y las continuaciones parecen lineas nuevas → salidas atribuidas al
+  comando equivocado.
+- **`#{alternate_on}` convierte una heuristica en un hecho**: se pregunta a tmux
+  si una app curses (vim/htop) posee la pantalla en vez de adivinarlo del texto.
+  Cuesta unos bytes en la conexion que ya esta abierta.
+- **`@concurrent` (SE-0461) compila con `SWIFT_VERSION = 6.0`**. Se usa en
+  `TranscriptParser.parsed(_:)` para garantizar que el parseo de 2000 lineas no
+  corre en el MainActor aunque algun dia se active Approachable Concurrency
+  (que invierte la semantica de `nonisolated async`).
+- El wrapper async NO puede llamarse `parse` como el sincrono: el overload hace
+  que la version async se llame a si misma. Se llama `parsed`.
+
+### UUID REALES de los simuladores (los de sesiones anteriores caducaron)
+
+    iPhone 17 Pro          112C8364-7CD7-4782-9DB7-E7ECADE64402
+    iPad Pro 11-inch (M5)  686E242B-5C89-44BE-BA28-F651DC729C20
+
+No existe ningun iPad Air en esta maquina. Usar UUID, no nombre.
+
+### Arnes para VER la vista sin conexion SSH
+
+Mismo truco que el del KeyRail. `/tmp/ChatPreview/` (`project.yml` + xcodegen,
+bundle `com.danobat.ChatPreview`, dd en `/tmp/ChatPreview/dd`) copia los
+`TranscriptTurnView.swift` / `DesignSystem.swift` / `TranscriptParser.swift`
+REALES y los renderiza con scrollbacks de ejemplo. Como `simctl io ... tap` no
+existe, la pantalla se elige por argumento de lanzamiento:
+
+    xcrun simctl launch <UDID> com.danobat.ChatPreview raw     # bloque sin estructurar
+    xcrun simctl launch <UDID> com.danobat.ChatPreview long    # truncado "Show all"
+
+Y `/tmp/parsercheck/` compila el parser real con `swiftc -swift-version 6`
+contra 33 asserts (salida limpia, sin prompts, ANSI, vacia, trampa de `$`,
+curses, exit code, cabeza truncada...). No hay target de tests en `project.yml`
+y no se creo uno; el parser es puro justamente para poder comprobarlo asi.
