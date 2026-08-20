@@ -150,7 +150,10 @@ struct ChatScreen: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 13) {
-                    if let fallback = chat.transcript.fallback {
+                    if let claude = chat.transcript.claudeCode {
+                        ClaudeCodeBanner(status: claude) { showingTerminal = true }
+                            .padding(.bottom, 2)
+                    } else if let fallback = chat.transcript.fallback {
                         FallbackNote(fallback: fallback) { showingTerminal = true }
                             .padding(.bottom, 2)
                     }

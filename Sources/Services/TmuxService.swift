@@ -7,7 +7,7 @@ import Foundation
 /// (e.g. the `@MainActor` view model) only ever exchange Sendable values.
 struct TmuxService {
     /// Fields, pipe-separated: name | attached | created | activity
-    static let listFormat = "#S|#{session_attached}|#{session_created}|#{session_activity}"
+    static let listFormat = "#S|#{session_attached}|#{session_created}|#{session_activity}|#{pane_current_command}|#{pane_title}"
 
     /// Non-interactive SSH exec channels get a minimal PATH
     /// (`/usr/bin:/bin:/usr/sbin:/sbin`), which omits Homebrew. Prefix every
@@ -33,10 +33,24 @@ struct TmuxService {
                 let attached = parts[1] == "1"
                 let created = Date(timeIntervalSince1970: Double(parts[2]) ?? 0)
                 let activity = Date(timeIntervalSince1970: Double(parts[3]) ?? 0)
+                let command = parts.count > 4 ? String(parts[4]) : ""
+                // A title may legitimately contain "|", so keep the tail whole.
+                let title = parts.count > 5 ? parts[5...].joined(separator: "|") : ""
 
+                // Claude Code's last line is its mode bar ("auto mode on…"),
+                // which says nothing about the session. Read enough of the pane
+                // to find the spinner and summarise the real state instead.
+                let isClaude = ClaudeCodeRecogniser.isClaudeCode(command: command)
                 let pane = (try? await shell.run(
-                    "\(Self.pathPrefix) tmux capture-pane -p -t \(Self.quote(name)) -S -3 2>/dev/null || true"
+                    "\(Self.pathPrefix) tmux capture-pane -p -J -t \(Self.quote(name)) -S -\(isClaude ? 40 : 3) 2>/dev/null || true"
                 )) ?? ""
+
+                let preview: String
+                if isClaude {
+                    preview = ClaudeCodeRecogniser.status(text: pane, paneTitle: title).summary
+                } else {
+                    preview = Self.lastNonEmptyLine(pane)
+                }
 
                 sessions.append(
                     TmuxSession(
@@ -44,7 +58,7 @@ struct TmuxService {
                         isAttached: attached,
                         created: created,
                         lastActivity: activity,
-                        preview: Self.lastNonEmptyLine(pane),
+                        preview: preview,
                         contentHash: pane.hashValue
                     )
                 )
@@ -157,15 +171,18 @@ struct TmuxService {
 
     private static func snapshot(_ shell: RemoteShell, session name: String, lines: Int) async throws -> PaneSnapshot {
         let text = try await shell.run(captureCommand(session: name, lines: lines))
+        // One round trip for all three facts. `pane_title` is last because
+        // Claude Code puts the current task there and it may contain spaces.
         let info = (try? await shell.run(
-            "\(pathPrefix) tmux display-message -p -t \(quote(name)) '#{alternate_on}|#{pane_current_command}' 2>/dev/null || true"
+            "\(pathPrefix) tmux display-message -p -t \(quote(name)) '#{alternate_on}|#{pane_current_command}|#{pane_title}' 2>/dev/null || true"
         )) ?? ""
 
         let parts = info.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "|", omittingEmptySubsequences: false)
         return PaneSnapshot(
             text: text,
             alternateScreen: parts.first.map { $0 == "1" } ?? false,
-            currentCommand: parts.count > 1 ? String(parts[1]) : ""
+            currentCommand: parts.count > 1 ? String(parts[1]) : "",
+            paneTitle: parts.count > 2 ? parts[2...].joined(separator: "|") : ""
         )
     }
 

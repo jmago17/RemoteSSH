@@ -43,12 +43,17 @@ struct Transcript: Hashable, Sendable {
     /// `nil` when the pane really was parsed into turns. Otherwise the reason
     /// the parser gave up and fell back to a single `.raw` block.
     var fallback: Fallback?
+    /// Set when the pane is running Claude Code. The frame is still shown raw —
+    /// we summarise its state, we never re-render its body.
+    var claudeCode: ClaudeCodeStatus?
 
     enum Fallback: Hashable, Sendable {
         /// Nothing in the pane at all.
         case emptyPane
         /// tmux says a full-screen program owns the pane (vim, htop, less).
         case fullScreenProgram(String)
+        /// Claude Code — recognised, summarised, and shown as a live frame.
+        case claudeCode
         /// No prompt signature could be inferred from the live prompt line.
         case noPromptFound
         /// A signature was found but it didn't survive the confidence gate.
@@ -63,6 +68,8 @@ struct Transcript: Hashable, Sendable {
             case .fullScreenProgram(let command):
                 let name = command.isEmpty ? "A full-screen program" : "`\(command)`"
                 return "\(name) is running in this pane, so it's showing a screen, not a log. Open the terminal to interact with it."
+            case .claudeCode:
+                return "Live screen from Claude Code. Shown as-is — it wraps its own text, so re-flowing it would break paths and commands."
             case .noPromptFound:
                 return "No shell prompt could be recognised in this pane. Showing it raw rather than guessing which command produced what."
             case .lowConfidence:
@@ -84,11 +91,14 @@ struct PaneSnapshot: Hashable, Sendable {
     var alternateScreen: Bool
     /// tmux `#{pane_current_command}` — the foreground process.
     var currentCommand: String
+    /// tmux `#{pane_title}` — Claude Code publishes the current task here.
+    var paneTitle: String
 
-    init(text: String, alternateScreen: Bool = false, currentCommand: String = "") {
+    init(text: String, alternateScreen: Bool = false, currentCommand: String = "", paneTitle: String = "") {
         self.text = text
         self.alternateScreen = alternateScreen
         self.currentCommand = currentCommand
+        self.paneTitle = paneTitle
     }
 
     private static let shells: Set<String> = [
@@ -167,6 +177,20 @@ enum TranscriptParser {
     static func parse(_ snapshot: PaneSnapshot) -> Transcript {
         let lines = normalise(snapshot.text)
         guard !lines.isEmpty else { return .empty }
+
+        // Claude Code trips the curses wire below, but it is the app's most
+        // common session and its frame is already conversational. Recognise it
+        // first and attach a status summary. The body still goes through as a
+        // raw frame: Claude hard-wraps to the pane width, so reflowing it into
+        // bubbles would corrupt paths and commands (`Pl` + `atforms`).
+        if ClaudeCodeRecogniser.isClaudeCode(command: snapshot.currentCommand) {
+            var t = raw(lines, because: .claudeCode)
+            t.claudeCode = ClaudeCodeRecogniser.status(
+                text: snapshot.text,
+                paneTitle: snapshot.paneTitle
+            )
+            return t
+        }
 
         // Layer 1 — the reliable check. A curses app owns the screen, so the
         // dump is a *frame*, not a log. Never try to slice a frame: htop alone
