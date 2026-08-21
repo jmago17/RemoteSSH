@@ -14,24 +14,21 @@ Repo **publico** en GitHub. No commitear nada sensible.
 ## Donde esta ahora
 
 **Publicado en GitHub como repo publico**: https://github.com/jmago17/RemoteSSH
-22 commits, rama `main` con tracking a `origin/main`. Arbol limpio, nada sin
-pushear.
+`main` con tracking a `origin/main`, todas las ramas de feature mergeadas
+(`feature/chat-view`, `chat-polish`, `claude-code-status`, `tmux-shortcuts`).
 
-Las 5 fases previstas ya estaban completas de una sesion anterior (Brrr push,
+Las 5 fases previstas se completaron en sesiones anteriores (Brrr push,
 generacion de claves in-app, pinning TOFU de host key, restore con
-tmux-resurrect, multi-host). Esta sesion fue rediseño + iPad + teclado.
+tmux-resurrect, multi-host). Despues vino rediseño + iPad + teclado, luego la
+vista conversacional, el estado de Claude Code, los App Intents y el resumen
+con Apple Intelligence.
 
-Ultimos commits:
-- `aea84dc` feat(keys): configurable key rail slots + full special-key panel replacing keyboard
-- `47f578c` feat(ipad): first-class iPad layout with NavigationSplitView, adaptive settings, keyboard shortcuts
-- `a21dcc0` fix: suppress SwiftTerm native accessory bar (duplicated custom KeyCap rail)
-- `8abb863` wip: before Claude Design redesign (baseline green build)  ← baseline pre-rediseño
+Compila en verde en iPhone 17 Pro y iPad Pro 11" (M5), iOS 27.
 
-Compila en verde en iPhone 17 y iPad Air 13" (M4).
-
-**Verificado 2026-08-20 11:04**: `HEAD` sigue en `aea84dc`, `main...origin/main`
-sin divergencia, `git status --porcelain` vacio. Nada pendiente de commit ni de
-push; el trabajo de la sesion del 19 quedo integro en el remoto.
+**OJO con la documentacion de estado**: el `ESTADO.md` de `_MinisBackup` se
+quedo anclado en `aea84dc` / "22 commits" mientras el repo seguia avanzando.
+Antes de fiarte de cualquiera de los dos ficheros, contrasta con
+`git log --oneline -5`.
 
 ## Pendiente
 
@@ -222,3 +219,149 @@ Y `/tmp/parsercheck/` compila el parser real con `swiftc -swift-version 6`
 contra 33 asserts (salida limpia, sin prompts, ANSI, vacia, trampa de `$`,
 curses, exit code, cabeza truncada...). No hay target de tests en `project.yml`
 y no se creo uno; el parser es puro justamente para poder comprobarlo asi.
+
+
+## Sesion 2026-08-21: ancho del raw pane, teclado, latencia del resumen, Xcode Cloud
+
+Cuatro cosas que Josu reporto usando la app de verdad, mas el fallo de CI.
+
+### 1. Xcode Cloud: "a resolved file is required"
+
+```
+a resolved file is required when automatic dependency resolution is disabled
+and should be placed at .../RemoteSSH.xcodeproj/project.xcworkspace/
+xcshareddata/swiftpm/Package.resolved
+```
+
+**Causa**: Xcode Cloud resuelve paquetes con la resolucion automatica
+DESACTIVADA, asi que un `Package.resolved` ausente es un fallo duro, no un
+"pues lo resuelvo yo". Y su ruta natural cae dentro de `RemoteSSH.xcodeproj/`,
+que esta gitignorado porque lo genera XcodeGen. El fichero nunca llegaba a CI.
+
+**Arreglo**: la copia fijada se versiona en `swiftpm/Package.resolved` (raiz del
+repo) y `ci_post_clone.sh` la copia a su sitio **despues** de `xcodegen
+generate`. La linea generica `Package.resolved` salio del `.gitignore` — esta
+documentado ahi mismo para que nadie la reponga.
+
+**Mantenimiento**: al cambiar una version de dependencia hay que refrescarla:
+```sh
+cp RemoteSSH.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved swiftpm/
+```
+Si no, CI compila los pines viejos sin avisar.
+
+**De paso**: el resolved fija `swift-nio-ssh` a
+`https://github.com/Wellz26/swift-nio-ssh.git` 0.3.6 — un **fork de un
+tercero**, no el repo de Apple. Viene de Citadel 0.12.1, no lo metimos
+nosotros, pero conviene saberlo: es codigo ajeno en la ruta SSH de una app
+publicada.
+
+### 2. El raw pane sigue sin mostrar la linea entera (iPhone)
+
+El arreglo del 20 (`maxWidth: .infinity` al `ScrollView`) era **correcto pero
+insuficiente**, y por eso el sintoma no cambio: resolvia el desbordamiento del
+marco, no la anchura del texto. La causa real es aritmetica pura:
+
+| | |
+|---|---|
+| Ancho del pane de Claude Code | **61 columnas** (`#{pane_width}`) |
+| Ancho de linea a 12.5pt mono | 61 × 0.6 × 12.5 ≈ **460pt** |
+| Columna del transcript en iPhone 17 Pro | **374pt** (402 − 28 de padding) |
+
+Faltaban ~90pt. Ningun `frame` arregla eso; solo cabe encoger la letra, que es
+lo que hace cualquier terminal movil.
+
+**Arreglo** (`TranscriptTurnView`): `outputFontSize` escala el texto para que la
+linea real mas ancha quepa, con suelo en **7.5pt** — por debajo se vuelve al
+scroll horizontal. El ratio de avance del monoespaciado se **mide** de
+`UIFont.monospacedSystemFont`, no se supone.
+
+**Las reglas decorativas se excluyen del calculo y se recortan al dibujar.**
+`capture-pane -S -2000` alcanza scrollback escrito cuando el pane tenia otro
+ancho, asi que una sesion de 61 columnas arrastra lineas `────` de **240 y 183
+caracteres** de cuando la ventana era ancha. Sin filtrarlas, el ajuste encogia
+todo a un cuarto del tamaño necesario y el scroll horizontal medía cuatro veces
+mas que el texto: casi todo el arrastre recorria una raya.
+
+**Dos trampas que costaron una iteracion cada una** (ambas verificadas con
+screenshot, no razonadas):
+
+- **`.onGeometryChange` va ANTES de `.padding`**, no despues. `.padding()`
+  devuelve una vista *mas ancha* que su contenido, asi que medir despues
+  reporta el ancho de pantalla (402) en vez del de columna (374) — 28pt de mas,
+  que es exactamente un bloque que sigue cortando ~4 caracteres por linea.
+- **El suelo estaba en 8.5pt** y el caso real pedia 8.09 en la medida erronea.
+  Un suelo demasiado alto convierte el ajuste en un no-op silencioso.
+
+### 3. Teclado: fuera el boton Done
+
+Sustituido por el gesto de las apps de mensajeria: **tocar la burbuja enfoca,
+tocar cualquier otro sitio esconde**.
+
+- El `ToolbarItemGroup(placement: .keyboard)` colgado del `TextField` era ademas
+  el sospechoso del descuadre que veia Josu (la burbuja bajo la barra de
+  predicciones y luego encima del Done): instala su propio input accessory view
+  y su altura pelea con el inset de safe area que SwiftUI ya aplica al
+  compositor.
+- El dismiss va con `.simultaneousGesture(TapGesture())` sobre `content(chat)`,
+  no con `.onTapGesture`: el transcript esta lleno de cosas que deben seguir
+  respondiendo al mismo toque ("Show all", el banner, "Try Again", texto
+  seleccionable).
+- `.scrollDismissesKeyboard` pasa de `.interactively` a `.immediately`: un
+  teclado arrastrado a medias deja el compositor parado a mitad de animacion,
+  que es justo el estado "la burbuja se ha descuadrado".
+- La pastilla entera enfoca (`contentShape` + `onTapGesture`), no solo el
+  `TextField`.
+
+### 4. El resumen de Apple Intelligence tardaba demasiado
+
+**Premisa descartada primero**: no era que cogiera demasiado texto. Medido con
+el `ClaudeCodeRecogniser` real contra un pane real de `newsRaider`,
+`lastConclusion` devuelve **1.589 caracteres / 32 lineas** — unos cientos de
+tokens. La espera era el modelo arrancando y escribiendo.
+
+Tres costes, todos *despues* del instante en que el usuario empieza a esperar:
+carga del modelo, prefill de las instrucciones (prefijo fijo, identico siempre)
+y generacion completa antes de mostrar nada.
+
+**Arreglo** (`ClaudeCodeSummariser`):
+- `prepare()` precalienta una sesion **mientras Claude Code trabaja**, que es
+  una ventana de minutos con el dispositivo ocioso. Lo dispara
+  `ChatSessionModel.refresh()` al ver `.working`.
+- `session.prewarm(promptPrefix:)` incluye el prefijo fijo del prompt, asi que
+  al llegar la llamada real solo queda prefilar la conclusion.
+- **Una sesion por resumen, nunca reutilizada**: `LanguageModelSession` acumula
+  transcript, y reusarla realimentaria cada conclusion anterior como contexto —
+  cada vez mas lenta y con texto ajeno disponible para colarse en la respuesta.
+- `streamResponse` en vez de `respond`: la tarjeta pinta el titular en cuanto
+  existe. `ClaudeCodeConclusionCard` muestra un `ProgressView` mini junto a
+  SUMMARY mientras sigue escribiendo, para que no parezca una tarjeta acabada
+  que cambia sola.
+- `GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 220)`.
+  Greedy es el modo mas rapido y ademas hace que la misma conclusion se resuma
+  igual dos veces — importa porque el cache por digest de contenido hace que
+  una tarjeta que se reescribe sola parezca un bug.
+- Bullets de 0...5 a **0...3**: los dos ultimos repetian el titular mas veces
+  de las que aportaban un dato.
+
+**NO verificado**: el resumen sigue sin poder probarse end-to-end. El simulador
+no tiene el modelo on-device aprovisionado (`ModelManagerError 1026`), asi que
+la mejora de latencia esta razonada y compilada, **no medida**. Hace falta un
+iPhone real con Apple Intelligence activo.
+
+### Arnes de ancho (reproducible)
+
+`/tmp/.../scratchpad/WidthPreview/` — app xcodegen (`com.danobat.WidthPreview`)
+que compila los `TranscriptTurnView.swift` / `DesignSystem.swift` /
+`TranscriptParser.swift` / `ClaudeCodeRecogniser.swift` REALES y los renderiza
+sobre un `capture-pane` REAL guardado en `Resources/pane.txt`. La pantalla se
+elige por argumento porque `simctl io ... tap` no existe:
+
+```sh
+xcrun simctl launch <UDID> com.danobat.WidthPreview before   # availableWidth = 0
+xcrun simctl launch <UDID> com.danobat.WidthPreview after    # ancho medido
+```
+
+**El arnes necesita `UILaunchScreen`**. Sin el, iOS lo ejecuta en modo
+compatibilidad a 320×568 (un iPhone SE virtual) y mide una columna de 320pt en
+un telefono de 402pt — media hora perdida persiguiendo un fantasma. En
+`project.yml` del arnes: `INFOPLIST_KEY_UILaunchScreen_Generation: "YES"`.

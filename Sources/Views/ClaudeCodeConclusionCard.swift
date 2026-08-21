@@ -37,6 +37,13 @@ struct ClaudeCodeConclusionCard: View {
                     .font(.mono(9.5, .semibold))
                     .tracking(0.6)
                     .foregroundStyle(Theme.textTertiary)
+                // The card now fills in as the model writes, so it can be
+                // on-screen and still growing. Without this marker a headline
+                // that is about to gain bullets looks like a finished card
+                // that then changes under the reader.
+                if isSummarising {
+                    ProgressView().controlSize(.mini).tint(Theme.textTertiary)
+                }
             }
 
             Text(summary.headline)

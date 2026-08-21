@@ -17,6 +17,12 @@ struct ChatScreen: View {
     /// Output blocks that the user has asked to see in full.
     @State private var expandedTurns: Set<Int> = []
     @State private var showingTerminal = false
+    /// Width of the transcript column, handed to each output block so it can
+    /// size its monospaced text to the columns it actually has. Measured here
+    /// rather than per row: every row gets the same column, and a
+    /// GeometryReader inside a LazyVStack row is exactly the kind of
+    /// self-referential sizing that makes lazy stacks misbehave.
+    @State private var transcriptWidth: CGFloat = 0
     @FocusState private var composerFocused: Bool
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -30,6 +36,21 @@ struct ChatScreen: View {
 
             if let chat {
                 content(chat)
+                    // Tap-outside-to-dismiss, the way every messaging app does
+                    // it — this replaces a keyboard-toolbar Done button, which
+                    // was both ugly and the likely cause of the composer
+                    // landing *under* the QuickType bar: a
+                    // `ToolbarItemGroup(placement: .keyboard)` hung off a
+                    // TextField installs its own input accessory view, and
+                    // that view's height fights the keyboard safe-area inset
+                    // SwiftUI is already applying to the composer.
+                    //
+                    // `simultaneousGesture`, not `onTapGesture`: everything
+                    // above the composer is full of things that must still
+                    // answer the same tap — the "Show all" footer, the Claude
+                    // Code banner, "Try Again", selectable text. A plain tap
+                    // gesture would swallow them.
+                    .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
                 composer(chat)
             } else {
                 Spacer()
@@ -175,6 +196,7 @@ struct ChatScreen: View {
                         TranscriptTurnView(
                             turn: turn,
                             isExpanded: expandedTurns.contains(turn.id),
+                            availableWidth: transcriptWidth,
                             onToggleExpanded: { toggle(turn.id) }
                         )
                         .id(turn.id)
@@ -188,12 +210,21 @@ struct ChatScreen: View {
 
                     Color.clear.frame(height: 1).id(bottomID)
                 }
+                // Measured on the stack itself, BEFORE the padding modifiers.
+                // Order matters and got this wrong once: `.padding()` returns a
+                // view *wider* than its content, so measuring after it reports
+                // the full screen width and every block is then sized ~28pt too
+                // wide — which looks exactly like the bug this is meant to fix.
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { transcriptWidth = $0 }
                 .padding(.horizontal, isRegular ? 22 : 14)
                 .padding(.top, 15)
                 .padding(.bottom, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .scrollDismissesKeyboard(.interactively)
+            // `.immediately` rather than `.interactively`: a half-dragged
+            // keyboard leaves the composer parked mid-animation, which is
+            // exactly the "bubble ends up in the wrong place" state.
+            .scrollDismissesKeyboard(.immediately)
             .onChange(of: chat.transcript) { _, _ in scrollToBottom(proxy) }
             .onChange(of: chat.pendingCommand) { _, _ in scrollToBottom(proxy) }
             .onAppear { scrollToBottom(proxy, animated: false) }
@@ -281,22 +312,15 @@ struct ChatScreen: View {
                     .onSubmit { submit(chat) }
                     .submitLabel(.send)
                     .disabled(chat.isSending)
-                    .toolbar {
-                        // TextField's own Return key sends the command via
-                        // onSubmit rather than dismissing — there was no way
-                        // to put the keyboard away without touching the pane
-                        // below it (which itself scrolls under the keyboard).
-                        // A standard keyboard-toolbar Done button fixes that.
-                        ToolbarItemGroup(placement: .keyboard) {
-                            Spacer()
-                            Button("Done") { composerFocused = false }
-                                .font(.system(size: 15, weight: .semibold))
-                        }
-                    }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
             .frame(minHeight: 38)
+            // The whole pill focuses, not just the glyphs inside it — tapping
+            // the `$` or the padding beside a one-word draft is the same
+            // intent as tapping the text. Messaging apps all behave this way.
+            .contentShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
+            .onTapGesture { composerFocused = true }
             .background(
                 RoundedRectangle(cornerRadius: 19, style: .continuous)
                     .fill(Theme.surfaceRaised)

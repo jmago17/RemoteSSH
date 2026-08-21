@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// One turn in the conversation.
 ///
@@ -11,11 +12,45 @@ import SwiftUI
 struct TranscriptTurnView: View {
     let turn: TranscriptTurn
     let isExpanded: Bool
+    /// Width of the transcript column, measured once by `ChatScreen`. Zero
+    /// until the first layout pass, which simply means "don't shrink anything
+    /// yet".
+    let availableWidth: CGFloat
     let onToggleExpanded: () -> Void
 
     /// Lines shown before an output block is collapsed. A 5000-line build log
     /// would otherwise make the whole transcript unusable.
     private static let collapsedLineLimit = 24
+
+    /// Type size for output when it already fits.
+    private static let baseOutputFontSize: CGFloat = 12.5
+
+    /// The floor for shrink-to-fit. Below this the block goes back to
+    /// scrolling sideways instead: a 200-column build log would otherwise be
+    /// rendered at about 4pt, which fits and is unreadable, which is worse
+    /// than not fitting.
+    ///
+    /// 7.5 rather than a rounder 8 or 9 because the floor has to clear the
+    /// case this feature exists for. Measured: a Claude Code pane is 61
+    /// columns, an iPhone 17 Pro gives the transcript 374pt, a block spends 24
+    /// of them on padding — so the widest real line needs 9.6pt and fits
+    /// comfortably. The floor's job is the *next* case down: an 80-column
+    /// shell pane needs 7.3pt, close enough that 7.5 keeps all but the last
+    /// character or two on screen, where 8.5 would have cut a whole word off
+    /// every line.
+    private static let minimumOutputFontSize: CGFloat = 7.5
+
+    /// Horizontal padding inside an output block, both sides together.
+    private static let blockPadding: CGFloat = 24
+
+    /// Advance width of one monospaced character per point of type size.
+    /// Measured from the real font rather than assumed: `.system(design:
+    /// .monospaced)` resolves to SF Mono, whose advance happens to be ~0.6em,
+    /// but that is a fact about today's font, not a promise of the API.
+    private static let advanceRatio: CGFloat = {
+        let probe = UIFont.monospacedSystemFont(ofSize: 100, weight: .regular)
+        return "0".size(withAttributes: [.font: probe]).width / 100
+    }()
 
     var body: some View {
         switch turn.kind {
@@ -113,8 +148,8 @@ struct TranscriptTurnView: View {
                 // has something concrete to scroll, and the outer frame is
                 // what actually claims the available column width.
                 ScrollView(.horizontal, showsIndicators: true) {
-                    Text(visibleText)
-                        .font(.mono(12.5))
+                    Text(renderedText)
+                        .font(.mono(outputFontSize))
                         .foregroundStyle(Theme.text.opacity(0.92))
                         .textSelection(.enabled)
                         .fixedSize(horizontal: true, vertical: false)
@@ -186,6 +221,69 @@ struct TranscriptTurnView: View {
         return turn.text
             .split(separator: "\n", omittingEmptySubsequences: false)
             .prefix(Self.collapsedLineLimit)
+            .joined(separator: "\n")
+    }
+
+    // MARK: Fitting output to the screen
+
+    /// How many columns this block genuinely needs.
+    ///
+    /// Decorative rules are excluded deliberately. `capture-pane -S -2000`
+    /// reaches back into scrollback written when the pane had a *different*
+    /// width, so a Claude Code session that is 61 columns wide today still
+    /// carries `────…` lines 240 characters long from when the window was
+    /// wide. Sizing to those would shrink every real line to a quarter of what
+    /// it needs, and they are the reason the horizontal scroll used to run
+    /// four times longer than any readable text — most of the drag travelled
+    /// along a ruler.
+    private var contentColumns: Int {
+        visibleText
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .lazy
+            .filter { !Self.isDecorativeRule($0) }
+            .map(\.count)
+            .max() ?? 0
+    }
+
+    /// A line that is nothing but box-drawing or separator glyphs. The length
+    /// floor keeps a genuine `--` or a `│` gutter character from qualifying.
+    private static func isDecorativeRule(_ line: Substring) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count > 8 else { return false }
+        return trimmed.allSatisfy { "─━═-–—_·⎯│┌┐└┘├┤┬┴┼╌╍┄┅".contains($0) }
+    }
+
+    /// Shrinks the type just enough for the widest real line to fit, the way a
+    /// terminal app fits columns to the screen.
+    ///
+    /// No amount of `frame` or `fixedSize` work can fix this case, which is
+    /// why the previous attempt didn't: a 61-column pane at 12.5pt needs about
+    /// 460pt and an iPhone offers about 360pt. The last columns were simply
+    /// off-screen, and the only way to see them was to notice the block
+    /// scrolled sideways at all.
+    private var outputFontSize: CGFloat {
+        let columns = contentColumns
+        guard columns > 0, availableWidth > 0 else { return Self.baseOutputFontSize }
+        let usable = availableWidth - Self.blockPadding
+        guard usable > 0 else { return Self.baseOutputFontSize }
+        let fitted = usable / (CGFloat(columns) * Self.advanceRatio)
+        return min(Self.baseOutputFontSize, max(Self.minimumOutputFontSize, fitted))
+    }
+
+    /// The text as drawn: `visibleText` with decorative rules clipped to the
+    /// block's own width. Clipping ornament is safe in a way that clipping
+    /// content never is, and it stops one stale 240-character rule from
+    /// dictating the width of a scroll canvas nobody wants to drag across.
+    private var renderedText: String {
+        let columns = contentColumns
+        guard columns > 0 else { return visibleText }
+        return visibleText
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { line in
+                Self.isDecorativeRule(line) && line.count > columns
+                    ? line.prefix(columns)
+                    : line
+            }
             .joined(separator: "\n")
     }
 
