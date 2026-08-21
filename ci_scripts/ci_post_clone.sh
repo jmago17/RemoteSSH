@@ -74,5 +74,32 @@ if [ ! -d "RemoteSSH.xcodeproj" ]; then
     exit 1
 fi
 
+# Put the SPM pin file where Xcode expects it.
+#
+# WHY: Xcode Cloud resolves packages with automatic resolution DISABLED, so a
+# missing Package.resolved is a hard failure, not a "resolve it then":
+#
+#     a resolved file is required when automatic dependency resolution is
+#     disabled and should be placed at .../xcshareddata/swiftpm/Package.resolved
+#
+# Its natural path is inside RemoteSSH.xcodeproj/, which is generated and
+# therefore gitignored — so the pinned copy is versioned at swiftpm/ in the repo
+# root and copied here after generation. Refresh it with:
+#
+#     cp RemoteSSH.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved swiftpm/
+#
+# whenever a dependency version changes, or CI will build the old pins.
+RESOLVED_SRC="swiftpm/Package.resolved"
+RESOLVED_DST_DIR="RemoteSSH.xcodeproj/project.xcworkspace/xcshareddata/swiftpm"
+
+if [ ! -f "$RESOLVED_SRC" ]; then
+    echo "error: $RESOLVED_SRC is missing — Xcode Cloud cannot resolve packages without it."
+    exit 1
+fi
+
+mkdir -p "$RESOLVED_DST_DIR"
+cp "$RESOLVED_SRC" "$RESOLVED_DST_DIR/Package.resolved"
+echo "Copied $RESOLVED_SRC -> $RESOLVED_DST_DIR/Package.resolved"
+
 echo "--- Generated successfully ---"
 ls -d RemoteSSH.xcodeproj RemoteSSH-Info.plist RemoteSSH.entitlements 2>/dev/null || true
