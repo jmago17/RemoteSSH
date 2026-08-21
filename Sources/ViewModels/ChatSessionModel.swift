@@ -102,6 +102,12 @@ final class ChatSessionModel {
             transcript = parsed
             errorMessage = nil
             pendingCommand = nil
+            // Warm the on-device model now, while Claude Code is still busy
+            // and nobody is waiting on us. By the time there's a conclusion to
+            // summarise, model load and instruction prefill are already paid.
+            if case .working = parsed.claudeCode?.activity {
+                ClaudeCodeSummariser.prepare()
+            }
             summariseIfNewConclusion(parsed.claudeCode?.activity)
         } catch {
             errorMessage = friendly(error)
@@ -181,13 +187,21 @@ final class ChatSessionModel {
         summaryError = nil
         defer { isSummarising = false }
         do {
-            let summary = try await ClaudeCodeSummariser.summarise(conclusion)
+            let summary = try await ClaudeCodeSummariser.summarise(conclusion) { [weak self] partial in
+                // Show the headline the moment it exists rather than holding
+                // the whole card back for the last bullet. `isSummarising`
+                // stays true, so the card keeps its in-progress marker.
+                self?.conclusionSummary = partial
+            }
             conclusionSummary = summary
             // Persisted only on success: if this failed (Apple Intelligence
             // still downloading, device unsupported), the next refresh must
             // retry rather than remember a failure as "already summarised".
             Self.saveSummarisedDigest(digest, summary: summary, for: sessionName)
         } catch {
+            // Clears any partial the stream had already delivered: half a
+            // summary presented as finished is exactly the "confident and
+            // wrong" failure this whole feature is built to avoid.
             conclusionSummary = nil
             summaryError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
