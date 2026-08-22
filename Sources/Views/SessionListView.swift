@@ -165,42 +165,21 @@ struct SessionListView: View {
                 .accessibilityLabel("New Session")
                 .keyboardShortcut("n", modifiers: .command)
             }
+            // Settings sits on the bar itself rather than behind an overflow
+            // menu. What used to be in that menu didn't justify the extra tap
+            // it put on the one thing people actually reach for: Refresh
+            // duplicated pull-to-refresh, Restore Saved Sessions is already a
+            // button on the empty state that prompts it, and the two wake
+            // actions belong with the error that makes you want them — see
+            // `emptyState`.
             ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button {
-                        Task { await model.refresh() }
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-                    .keyboardShortcut("r", modifiers: .command)
-                    Button {
-                        Task { await model.restoreSessions() }
-                    } label: {
-                        Label("Restore Saved Sessions", systemImage: "arrow.clockwise.circle")
-                    }
-                    if model.config.canWakeOnLAN {
-                        Button {
-                            model.wakeOnLAN()
-                        } label: {
-                            Label("Wake Mac (LAN)", systemImage: "power")
-                        }
-                    }
-                    Button {
-                        Task { await model.wakeDisplay() }
-                    } label: {
-                        Label("Wake Display", systemImage: "sun.max")
-                    }
-                    Divider()
-                    Button {
-                        showingSettings = true
-                    } label: {
-                        Label("Settings", systemImage: "gearshape")
-                    }
-                    .keyboardShortcut(",", modifiers: .command)
+                Button {
+                    showingSettings = true
                 } label: {
-                    Image(systemName: "ellipsis")
+                    Image(systemName: "gearshape")
                 }
-                .accessibilityLabel("More")
+                .accessibilityLabel("Settings")
+                .keyboardShortcut(",", modifiers: .command)
             }
         } else {
             ToolbarItem(placement: .topBarTrailing) {
@@ -325,12 +304,19 @@ struct SessionListView: View {
             } description: {
                 Text(error).font(.mono(12))
             } actions: {
+                // Order matters: Wake on LAN is the only one of the two that
+                // can reach a sleeping Mac, since it's a magic packet rather
+                // than a command. Wake Display runs `caffeinate` *over SSH*,
+                // so it needs the Mac already answering — it's the follow-up
+                // once the machine is up, or the fix when the Mac is awake and
+                // only its screen is off.
                 if model.config.canWakeOnLAN {
                     Button("Wake Mac") { model.wakeOnLAN() }
                         .buttonStyle(.borderedProminent)
                         .tint(Theme.live)
                         .foregroundStyle(Theme.onLive)
                 }
+                Button("Wake Display") { Task { await model.wakeDisplay() } }
                 Button("Retry") { Task { await model.refresh() } }
                 Button("Settings") { showingSettings = true }
             }
