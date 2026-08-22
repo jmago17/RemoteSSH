@@ -411,3 +411,129 @@ hooks de Claude Code, no de este watcher.
 **Corregido respecto a notas anteriores**: `gh` **si** tiene credencial en el
 Mac (`gh auth status` → `jmago17`, keyring, scopes `repo`/`workflow`). El
 pendiente "token caducado" ya no aplica.
+
+## Sesion 2026-08-22 (2): Codex, scrollback en la terminal, teclado
+
+### Reconocer un pane de Codex
+
+**El problema no era el parser, era el nombre del proceso.** tmux devuelve
+`claude.exe` para Claude Code — inconfundible. Para Codex devuelve **`node`**, y
+un `node` puede ser cualquier cosa. Con `alternate_on=0` (Codex NO usa pantalla
+alternativa), el pane caia en `isShell == false` → *"a full-screen program
+called node is running in this pane"*.
+
+**Deteccion determinista, no heuristica**: `ps -o args= -p #{pane_pid}` devuelve
+`node /opt/homebrew/bin/codex`. `TmuxService.snapshot` solo paga ese segundo
+round trip cuando el comando es un interprete generico (`node`, `bun`, `deno`,
+`python`, `python3`); `claude.exe`, `zsh` o `vim` ya se explican solos. El test
+textual de `CodexRecogniser.looksLikeCodexFrame` es solo el plan B para cuando
+`ps` no dice nada, y exige DOS marcas (composer `›` + status bar `modelo · /ruta`
+como ultima linea no vacia) porque cualquiera de las dos sola da falsos
+positivos.
+
+**Diferencias medidas contra un pane real de Codex 0.147.0** (no de memoria):
+
+| | Claude Code | Codex |
+|---|---|---|
+| `pane_current_command` | `claude.exe` | `node` |
+| `alternate_on` | `1` | **`0`** |
+| `pane_title` | la tarea | el **cwd**, con spinner braille `⠙` delante SOLO mientras trabaja |
+| spinner | `✽ Verb… (7m 3s · ↓ 22.4k tokens)` | `• Verb (2s • esc to interrupt)` — **sin `…`** |
+| composer | `❯` | `›` |
+| pregunta | `❯ 1. Yes` | `› 1. Review hooks` + `Press enter to confirm` |
+
+Consecuencias en el codigo: el spinner de Claude exige `…`, asi que su
+`isSpinnerLine` NO vale para Codex (ancla en `esc to interrupt`). Y el `›` solo
+no significa pregunta: **el composer en reposo tambien empieza por `›`**
+(`› Improve documentation in @filename`), asi que el digito es lo que decide.
+
+`task` se deja a `nil` para Codex a proposito: el titulo es el directorio, no
+una tarea, y vestir una ruta de tarea seria mentir.
+
+`ClaudeCodeStatus` pasa a llamarse **`AgentStatus`** (+ `AgentKind`), porque ya
+describe dos agentes. `ClaudeCodeBanner` → `AgentBanner`.
+
+**Lo que se dejo fuera adrede**: el resumen de conclusion sigue siendo solo de
+Claude Code. `lastConclusion` busca el ultimo turno por el marcador `⏺`, y Codex
+marca con `•`; apuntarlo a un frame de Codex resumiria lo que hubiera en la cola.
+Hace falta un extractor de Codex verificado antes de encender esa tarjeta.
+
+### BUG encontrado de paso: el estado se leia del scrollback
+
+`ClaudeCodeRecogniser.status` recibia las **2000 lineas** capturadas, no la
+pantalla. Una pregunta contestada hace una hora sigue en el scrollback → un pane
+ocioso se anunciaba como **"Waiting for your answer"**. Afectaba tambien a
+Claude Code. Lo destapo el arnes, no la lectura del codigo.
+
+Arreglo: `PaneSnapshot.visibleScreen` = las ultimas `#{pane_height}` lineas. El
+transcript sigue viendo las 2000; el ESTADO solo la pantalla. Funciona porque el
+agente redibuja: un prompt contestado desaparece de la pantalla y solo sobrevive
+en el historial (verificado: `capture-pane -p | grep -c "Review hooks"` → 0,
+`capture-pane -p -S -2000 | grep -c` → 1).
+
+**Verificado que el recorte es exacto**, no aproximado:
+
+```sh
+H=$(tmux display-message -p -t X '#{pane_height}')
+diff <(tmux capture-pane -p -t X) <(tmux capture-pane -p -J -S -2000 -t X | tail -$H)
+# IDENTICAS
+```
+
+### Scroll con historial en la terminal (copy-mode)
+
+Entrar y salir van por **comando tmux sobre SSH**, no por el PTY: la ruta de
+teclado es `prefix` + `[` y el prefijo es el que el usuario haya puesto (el de
+Josu es `C-b`, pero eso no se puede suponer). `tmux copy-mode -t <pane>` no
+depende del prefijo.
+
+Paginar SI va por el PTY, porque `PageUp`/`PageDown` estan bindeadas igual en
+las tablas emacs y vi de copy-mode y no necesitan prefijo — y asi el scroll es
+instantaneo en vez de una conexion SSH por pagina. Los dos extremos vuelven a ir
+por SSH (`history-top` / `history-bottom`) porque esos SI cambian de tabla.
+
+Todo comprobado contra un tmux vivo (`send-keys` sin `-X` entrega la tecla igual
+que la entregaria el PTY):
+
+```sh
+tmux copy-mode -t X                      # entra
+tmux send-keys -t X PPage                # sube una pagina  → scroll_position 11
+tmux send-keys -t X NPage                # baja             → 0
+tmux send-keys -X -t X history-top       # al principio
+tmux send-keys -X -t X cancel            # sale
+tmux display-message -p -t X '#{pane_in_mode} #{scroll_position}'
+```
+
+Se sale de copy-mode al abandonar la pantalla: un pane dejado en copy-mode no
+sigue la salida en vivo y **parece colgado** al siguiente que se conecte.
+
+### Teclado y el `ExpandedKeyPanel`
+
+La nota pendiente decia "ocultar el teclado al abrir el panel" y estaba mal
+planteada: eso YA lo hacia (`aea84dc`). Lo roto era lo contrario — al **cerrar**
+el panel nadie devolvia el foco, porque `didFocus` solo disparaba una vez. Ahora
+`TerminalHostView(wantsKeyboard:)` gobierna las dos direcciones, sobre la
+`TerminalView` concreta (no un `sendAction(_:to:nil…)` a ciegas) y **solo cuando
+el valor cambia**, para que un `updateUIView` por cualquier otra causa no vuelva
+a subir el teclado que el usuario acaba de bajar.
+
+### Arneses (reproducibles, fuera del repo)
+
+`<scratchpad>/codexharness/` — compila los `CodexRecogniser.swift` /
+`ClaudeCodeRecogniser.swift` REALES con `swiftc` y los corre contra frames
+capturados de un Codex vivo (14 casos: deteccion, falsos positivos con un dev
+server de vite, working/idle/approval, capado del verbo).
+
+`<scratchpad>/bothagents/` — mete el parser REAL por todos los panes tmux de la
+maquina con el `display-message` exacto que manda la app. Es la prueba de
+no-regresion de Claude Code: en la ultima pasada dio
+`claudeCode / working("Infusing") · 21m 53s · ↓66.9k`, `codex / idle`, y `zsh`
+→ no es agente.
+
+Dos trampas de `swiftc` sueltas: el fichero del arnes **debe llamarse
+`main.swift`** (si no, *"expressions are not allowed at the top level"*), y con
+`-swift-version 6` las funciones globales que tocan un `var` global necesitan
+`@MainActor`.
+
+**NO verificado**: nada de esto se ha visto en un iPhone. Compila y pasa los
+arneses; la barra de historial, el foco del teclado y el banner de Codex no se
+han tocado con un dedo.
