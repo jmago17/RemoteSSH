@@ -17,6 +17,9 @@ struct ChatScreen: View {
     /// Output blocks that the user has asked to see in full.
     @State private var expandedTurns: Set<Int> = []
     @State private var showingTerminal = false
+    /// Gates the kill confirmation. Killing a tmux session is not undoable and
+    /// takes whatever was running inside it with it, so it asks first.
+    @State private var confirmingKill = false
     /// Width of the transcript column, handed to each output block so it can
     /// size its monospaced text to the columns it actually has. Measured here
     /// rather than per row: every row gets the same column, and a
@@ -65,6 +68,22 @@ struct ChatScreen: View {
         .toolbar {
             ToolbarItem(placement: .principal) { titleBlock }
             ToolbarItem(placement: .topBarTrailing) { terminalButton }
+            ToolbarItem(placement: .topBarTrailing) { sessionMenu }
+        }
+        .confirmationDialog(
+            "Kill \(sessionName)?",
+            isPresented: $confirmingKill,
+            titleVisibility: .visible
+        ) {
+            Button("Kill Session", role: .destructive) {
+                // `model.kill` clears the selection, and the navigation path is
+                // derived from it — so this screen closes on its own, in both
+                // the pushed and the split-view layout.
+                Task { await model.kill(sessionName) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Whatever is running in this session is killed with it. tmux can't bring it back.")
         }
         .task {
             model.markRead(sessionName)
@@ -122,6 +141,27 @@ struct ChatScreen: View {
     /// The escape hatch. A `>_` cap rather than a menu item: it has to be
     /// reachable without thinking, because it's what you reach for the moment
     /// the conversation stops being able to help.
+    /// Actions on the session itself, as opposed to on the conversation in it.
+    /// Behind a menu rather than on the bar: the only thing in here is
+    /// destructive, and a one-tap kill sitting next to the terminal button is
+    /// a mis-tap waiting to happen.
+    private var sessionMenu: some View {
+        Menu {
+            Button(role: .destructive) {
+                confirmingKill = true
+            } label: {
+                Label("Kill Session", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Session actions")
+    }
+
     private var terminalButton: some View {
         Button {
             showingTerminal = true

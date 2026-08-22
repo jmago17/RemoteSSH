@@ -16,6 +16,11 @@ struct SessionListView: View {
     @State private var showingSettings = false
     @State private var renameTarget: TmuxSession?
     @State private var renameText = ""
+    /// The session a kill has been asked for but not yet confirmed. Killing is
+    /// not undoable and takes whatever was running inside the session with it,
+    /// so both routes to it — the swipe action and the row's context menu —
+    /// come through here first.
+    @State private var killTarget: TmuxSession?
     @State private var showingNewSession = false
     @State private var newSessionName = ""
     @State private var columnVisibility = NavigationSplitViewVisibility.all
@@ -51,6 +56,19 @@ struct SessionListView: View {
             }
         } message: {
             Text("Creates a detached tmux session on \(model.config.host).")
+        }
+        .confirmationDialog(
+            killTarget.map { "Kill \($0.name)?" } ?? "Kill session?",
+            isPresented: killBinding,
+            titleVisibility: .visible,
+            presenting: killTarget
+        ) { session in
+            Button("Kill Session", role: .destructive) {
+                Task { await model.kill(session.name) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { session in
+            Text("Whatever is running in \(session.name) is killed with it. tmux can't bring it back.")
         }
         .alert("Rename Session", isPresented: renameBinding) {
             TextField("New name", text: $renameText)
@@ -238,7 +256,7 @@ struct SessionListView: View {
                 .listRowSeparatorTint(Theme.hairline)
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) {
-                        Task { await model.kill(session.name) }
+                        killTarget = session
                     } label: {
                         Label("Kill", systemImage: "trash")
                     }
@@ -249,6 +267,23 @@ struct SessionListView: View {
                         Label("Rename", systemImage: "pencil")
                     }
                     .tint(Theme.surfaceRaised)
+                }
+                // The same two actions on long press. The swipe alone is
+                // close to undiscoverable in the split view's sidebar, where
+                // the row is narrow and the gesture competes with the
+                // column divider.
+                .contextMenu {
+                    Button {
+                        renameTarget = session
+                        renameText = session.name
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                    Button(role: .destructive) {
+                        killTarget = session
+                    } label: {
+                        Label("Kill Session", systemImage: "trash")
+                    }
                 }
             }
         }
@@ -356,6 +391,13 @@ struct SessionListView: View {
         Binding(
             get: { renameTarget != nil },
             set: { if !$0 { renameTarget = nil } }
+        )
+    }
+
+    private var killBinding: Binding<Bool> {
+        Binding(
+            get: { killTarget != nil },
+            set: { if !$0 { killTarget = nil } }
         )
     }
 }
