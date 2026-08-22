@@ -664,7 +664,16 @@ cuenta, y el record viejo tiene "RemoteSSH" cogido. O se le pone otro nombre, o
 primero se borra el viejo (App Information → Delete App), que solo se puede si
 nunca se publico.
 
-**Nota de versiones**: `MARKETING_VERSION` es `0.1.0` y el record viejo hablaba
-de "Version 1.0". Para TestFlight da igual (el build entra por su numero), pero
-si el record nuevo se crea como 1.0 y el binario dice 0.1.0, ese build no encaja
-en esa version de App Store. Alinear si se va a publicar.
+**Versiones**: `MARKETING_VERSION` pasa a **1.0** el 2026-08-22 (era `0.1.0`),
+para que coincida con la version que se le pone al app record nuevo. Verificado
+en el binario compilado, no solo en el yml:
+
+```sh
+/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" <app>/Info.plist   # 1.0
+```
+
+`CURRENT_PROJECT_VERSION` sigue en `1` y NO se toca: el numero de build lo
+incrementa Xcode Cloud (por eso el ultimo iba por el 10).
+
+**El record viejo se borro el 2026-08-22** — solo habia uno, asi que el nombre
+"RemoteSSH" queda libre para el nuevo.
