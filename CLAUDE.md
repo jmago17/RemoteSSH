@@ -583,3 +583,40 @@ grep -n "struct GenerationOptions" -A 30 \
   $D/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/System/Library/Frameworks/\
 FoundationModels.framework/Modules/FoundationModels.swiftmodule/arm64e-apple-ios.swiftinterface
 ```
+
+### ITMS-90626: la metadata de App Intents no puede decir "mac"
+
+Build 10 (Version 1.0) **entregado a App Store Connect y rechazado** el
+2026-08-22 — nota primero la buena noticia enterrada: Xcode Cloud ya compila y
+entrega, el bloqueo de "no se puede subir nada" quedó atrás.
+
+```
+ITMS-90626: Invalid Siri Support - App Intent description 'Sends a command to a
+tmux session on your Mac over SSH, …' cannot contain 'mac'
+```
+
+**Es una subcadena, no una palabra**: `machine` y `macOS` tambien la contienen y
+tambien caerian.
+
+**Alcance real: TODO lo que se extrae al bundle de App Intents**, no solo la
+cadena que Apple cita. El rechazo nombro el `IntentDescription`, pero
+`@Parameter(description:)` sale al mismo sitio y habria costado OTRO ciclo de
+build. Se limpiaron las dos a la vez, mas el `errorDescription`.
+
+**Los comentarios NO cuentan** (verificado dos veces, no supuesto): el
+doc-comment de la linea 3 decia "on the configured Mac" en el build 10 y Apple
+no lo menciono; y `grep -rl "configured Mac" RemoteSSH.app` no encuentra nada.
+Por eso el aviso de "no vuelvas a poner esta palabra" puede quedarse escrito en
+el propio fichero.
+
+**Los `Text`/`TextField` de la UI SI pueden decir "Mac"** y deben: el usuario
+piensa en su Mac, no en "un host". La regla es solo de App Intents / Siri.
+
+**Comprobarlo ANTES de gastar un ciclo de build** (el bundle lo genera cualquier
+build local):
+
+```sh
+APP=/tmp/<dd>/Build/Products/Debug-iphonesimulator/RemoteSSH.app
+grep -rioE "mac[a-z]*" "$APP/Metadata.appintents/"     # debe salir vacio
+grep -oE "Sends a command[^\"]*" "$APP/Metadata.appintents/extract.actionsdata"
+```

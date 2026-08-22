@@ -9,9 +9,20 @@ import AppIntents
 /// there is no second, less-tested way to talk to tmux.
 struct SendTmuxCommandIntent: AppIntent {
     static var title: LocalizedStringResource { "Send tmux Command" }
+    /// **Do not put the word "Mac" back in any of the strings below.** App
+    /// Store validation rejects the build outright:
+    ///
+    ///     ITMS-90626: Invalid Siri Support - App Intent description '…'
+    ///     cannot contain 'mac'
+    ///
+    /// It's matched as a substring, so "machine" and "macOS" are out too. The
+    /// rule applies to everything extracted into the App Intents metadata —
+    /// this description *and* the parameter descriptions below — not just the
+    /// one string the rejection happened to name. Comments are fine; only the
+    /// literals ship.
     static var description: IntentDescription {
         IntentDescription(
-            "Sends a command to a tmux session on your Mac over SSH, as if you'd typed it into RemoteSSH's chat.",
+            "Sends a command to a tmux session over SSH, as if you'd typed it into RemoteSSH's chat.",
             categoryName: "tmux"
         )
     }
@@ -25,7 +36,7 @@ struct SendTmuxCommandIntent: AppIntent {
     @Parameter(title: "Command", description: "The command to run, exactly as you'd type it.")
     var command: String
 
-    @Parameter(title: "Host", description: "Which Mac to send to. Defaults to the active one.")
+    @Parameter(title: "Host", description: "Which host to send to. Defaults to the active one.")
     var host: SSHHostEntity?
 
     static var parameterSummary: some ParameterSummary {
@@ -95,7 +106,7 @@ enum TmuxIntentError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .hostNotConfigured:
-            return "No Mac is configured in RemoteSSH yet. Open the app and add one first."
+            return "No host is configured in RemoteSSH yet. Open the app and add one first."
         case .noStoredCredential(let hostName):
             return "No stored credential for \(hostName). Open RemoteSSH and reconnect once."
         case .sendFailed(let sessionName, let underlying):
