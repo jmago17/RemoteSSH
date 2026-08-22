@@ -132,7 +132,7 @@ struct SessionTile: View {
     var punchOut: Color = Theme.bg
     var showsPresence: Bool = true
 
-    /// One letter per segment for multi-part names (`danobat-api` → DA,
+    /// One letter per segment for multi-part names (`home-api` → HO,
     /// `mac-studio` → MS) so sibling hosts like `mac-studio` and `macbook`
     /// don't collapse to the same tile.
     private var initials: String {

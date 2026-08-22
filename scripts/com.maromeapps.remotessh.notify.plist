@@ -3,18 +3,18 @@
   LaunchAgent for tmux-notify.sh. Edit the placeholders, then install:
 
     mkdir -p ~/Library/LaunchAgents ~/Library/Logs
-    cp scripts/com.danobat.remotessh.notify.plist ~/Library/LaunchAgents/
+    cp scripts/com.maromeapps.remotessh.notify.plist ~/Library/LaunchAgents/
     # edit the copy: set the script path and NTFY_TOPIC
-    launchctl load ~/Library/LaunchAgents/com.danobat.remotessh.notify.plist
+    launchctl load ~/Library/LaunchAgents/com.maromeapps.remotessh.notify.plist
 
   Stop / reload:
-    launchctl unload ~/Library/LaunchAgents/com.danobat.remotessh.notify.plist
+    launchctl unload ~/Library/LaunchAgents/com.maromeapps.remotessh.notify.plist
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.danobat.remotessh.notify</string>
+    <string>com.maromeapps.remotessh.notify</string>
 
     <key>ProgramArguments</key>
     <array>

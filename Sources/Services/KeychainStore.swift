@@ -6,7 +6,7 @@ import Security
 /// sync across the user's devices via iCloud Keychain (end-to-end encrypted),
 /// which is why hosts saved on one device work on another.
 enum KeychainStore {
-    private static let service = "com.danobat.RemoteSSH.credentials"
+    private static let service = "com.maromeapps.RemoteSSH.credentials"
 
     static func set(_ value: String, for account: String) throws {
         let data = Data(value.utf8)

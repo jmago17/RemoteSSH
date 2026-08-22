@@ -66,7 +66,7 @@ instead export `BRRR_WEBHOOK_SECRET`, but Keychain is cleaner.)
 ## 3. Install the LaunchAgent
 
 ```sh
-cp scripts/com.danobat.remotessh.notify.plist ~/Library/LaunchAgents/
+cp scripts/com.maromeapps.remotessh.notify.plist ~/Library/LaunchAgents/
 ```
 
 Edit the copy:
@@ -77,10 +77,10 @@ Edit the copy:
 Then load it:
 
 ```sh
-launchctl load ~/Library/LaunchAgents/com.danobat.remotessh.notify.plist
+launchctl load ~/Library/LaunchAgents/com.maromeapps.remotessh.notify.plist
 # reload after edits:
-launchctl unload ~/Library/LaunchAgents/com.danobat.remotessh.notify.plist && \
-launchctl load   ~/Library/LaunchAgents/com.danobat.remotessh.notify.plist
+launchctl unload ~/Library/LaunchAgents/com.maromeapps.remotessh.notify.plist && \
+launchctl load   ~/Library/LaunchAgents/com.maromeapps.remotessh.notify.plist
 ```
 
 Logs: `/tmp/remotessh-notify.log` and `/tmp/remotessh-notify.err`.

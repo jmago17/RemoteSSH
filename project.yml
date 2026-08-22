@@ -1,6 +1,6 @@
 name: RemoteSSH
 options:
-  bundleIdPrefix: com.danobat
+  bundleIdPrefix: com.maromeapps
   deploymentTarget:
     iOS: "26.0"
   createIntermediateGroups: true
@@ -31,7 +31,7 @@ targets:
       - path: RemoteSSH.icon
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.danobat.RemoteSSH
+        PRODUCT_BUNDLE_IDENTIFIER: com.maromeapps.RemoteSSH
         PRODUCT_NAME: RemoteSSH
         DEVELOPMENT_TEAM: ES2766ARHJ
         CODE_SIGN_STYLE: Automatic
@@ -61,7 +61,7 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         CFBundleURLTypes:
-          - CFBundleURLName: com.danobat.RemoteSSH
+          - CFBundleURLName: com.maromeapps.RemoteSSH
             CFBundleURLSchemes:
               - remotessh
     dependencies:

@@ -4,7 +4,7 @@ A SwiftUI iOS app that treats each **tmux session like a chat thread**: the list
 view is your "conversations," and tapping one opens that session's pane.
 
 Working name: *TmuxChat*. Product/bundle name: **RemoteSSH**
-(`com.danobat.RemoteSSH`).
+(`com.maromeapps.RemoteSSH`).
 
 ## Status — Phases 1–2 ✅
 
@@ -45,7 +45,7 @@ No notifications yet — see the roadmap below.
 **Recommended: Brrr** — real background push via the Brrr app (works when
 RemoteSSH is closed). Full guide: [`docs/notifications-brrr.md`](docs/notifications-brrr.md).
 In short: create a Brrr webhook, store its secret in the Keychain, set
-`BRRR_API_URL` in `scripts/com.danobat.remotessh.notify.plist`, and `launchctl
+`BRRR_API_URL` in `scripts/com.maromeapps.remotessh.notify.plist`, and `launchctl
 load` it.
 
 **Fallback: ntfy** — leave `BRRR_API_URL` unset and set `NTFY_TOPIC`. The in-app
