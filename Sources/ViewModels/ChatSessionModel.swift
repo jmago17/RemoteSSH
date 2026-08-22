@@ -116,26 +116,53 @@ final class ChatSessionModel {
 
     // MARK: Claude Code — live status + conclusion summary
 
-    /// Starts a light poll purely to keep the Claude Code banner honest while
-    /// it's working. Call when the screen appears; `stopWatching` cancels it
-    /// when the screen goes away (leaving one poller alive per open chat
-    /// screen would multiply SSH round trips for no benefit once the user has
-    /// navigated elsewhere).
+    /// How often to re-read the pane while Claude Code is working. Fast,
+    /// because this is what keeps the banner's elapsed time and verb honest.
+    private static let workingPollInterval = Duration.seconds(4)
+
+    /// How often to re-read it while Claude Code is idle or waiting on an
+    /// answer. Slower, but NOT never — see `startWatchingClaudeCode`.
+    private static let restingPollInterval = Duration.seconds(15)
+
+    /// Starts a light poll to keep the Claude Code banner honest.
+    ///
+    /// This used to skip the round trip entirely unless the pane was already
+    /// `.working`, on the assumption that an idle session has nothing that
+    /// changes between the user's own refreshes. That assumption is wrong, and
+    /// wrong in the direction that matters: **it made the idle -> working
+    /// transition invisible**. Claude Code starts working for reasons this app
+    /// never sees - the user typing on the Mac, a hook, a subagent - and once
+    /// the banner said idle, nothing ever looked again. The only way back to
+    /// "working" was to send a command from the app or return from the
+    /// terminal, i.e. exactly the cases that already refresh on their own.
+    ///
+    /// So it now always polls, just at two speeds. Ordinary shells (no Claude
+    /// Code in the pane) still cost nothing: there is no banner to keep honest.
+    ///
+    /// Call when the screen appears; `stopWatching` cancels it when the screen
+    /// goes away (leaving one poller alive per open chat screen would multiply
+    /// SSH round trips for no benefit once the user has navigated elsewhere).
     func startWatchingClaudeCode() {
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(4))
+                let interval = self?.pollInterval ?? Self.restingPollInterval
+                try? await Task.sleep(for: interval)
                 guard !Task.isCancelled else { return }
                 guard let self else { return }
-                // Only worth the round trip if this really is a Claude Code
-                // session that's actively doing something — an idle session,
-                // or any ordinary shell, has nothing that changes between the
-                // user's own refreshes.
-                guard case .working = self.transcript.claudeCode?.activity else { continue }
+                // An ordinary shell has no banner to keep honest, so it keeps
+                // the old deal: no polling at all.
+                guard self.transcript.claudeCode != nil else { continue }
                 await self.refresh()
             }
         }
+    }
+
+    private var pollInterval: Duration {
+        if case .working = transcript.claudeCode?.activity {
+            return Self.workingPollInterval
+        }
+        return Self.restingPollInterval
     }
 
     func stopWatchingClaudeCode() {
