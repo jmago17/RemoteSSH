@@ -179,14 +179,23 @@ struct ChatScreen: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 13) {
-                    if let claude = chat.transcript.claudeCode {
-                        ClaudeCodeBanner(status: claude) { showingTerminal = true }
-                        ClaudeCodeConclusionCard(
-                            summary: chat.conclusionSummary,
-                            isSummarising: chat.isSummarising,
-                            errorMessage: chat.summaryError
-                        )
-                        .padding(.bottom, 2)
+                    if let agent = chat.transcript.agent {
+                        AgentBanner(status: agent) { showingTerminal = true }
+                        // The conclusion card is Claude-Code-only on purpose:
+                        // `lastConclusion` finds the last turn by Claude Code's
+                        // `⏺` marker, and Codex marks its turns with `•`
+                        // instead. Feeding a Codex frame through it would
+                        // summarise whatever the tail happened to be, so until
+                        // there's a verified Codex extractor the card stays
+                        // away rather than guess.
+                        if agent.agent == .claudeCode {
+                            ClaudeCodeConclusionCard(
+                                summary: chat.conclusionSummary,
+                                isSummarising: chat.isSummarising,
+                                errorMessage: chat.summaryError
+                            )
+                            .padding(.bottom, 2)
+                        }
                     } else if let fallback = chat.transcript.fallback {
                         FallbackNote(fallback: fallback) { showingTerminal = true }
                             .padding(.bottom, 2)

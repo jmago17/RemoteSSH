@@ -3,7 +3,7 @@ import SwiftUI
 /// The AI-generated recap of what Claude Code just concluded, shown once
 /// after a working → idle transition.
 ///
-/// Deliberately a *separate* card from `ClaudeCodeBanner`, not folded into
+/// Deliberately a *separate* card from `AgentBanner`, not folded into
 /// it: the banner answers "what's happening right now" (a live, ephemeral
 /// state); this answers "what did it just say" (a settled fact about the
 /// turn that just finished). Merging them would make the banner's meaning

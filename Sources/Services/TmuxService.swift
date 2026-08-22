@@ -6,8 +6,10 @@ import Foundation
 /// non-Sendable `RemoteShell` never escapes a nonisolated async scope. Callers
 /// (e.g. the `@MainActor` view model) only ever exchange Sendable values.
 struct TmuxService {
-    /// Fields, pipe-separated: name | attached | created | activity
-    static let listFormat = "#S|#{session_attached}|#{session_created}|#{session_activity}|#{pane_current_command}|#{pane_title}"
+    /// Fields, pipe-separated. `pane_title` stays last because it may itself
+    /// contain a `|` — Claude Code puts the current task there — so the tail is
+    /// rejoined rather than indexed.
+    static let listFormat = "#S|#{session_attached}|#{session_created}|#{session_activity}|#{pane_current_command}|#{pane_height}|#{pane_title}"
 
     /// Non-interactive SSH exec channels get a minimal PATH
     /// (`/usr/bin:/bin:/usr/sbin:/sbin`), which omits Homebrew. Prefix every
@@ -34,20 +36,40 @@ struct TmuxService {
                 let created = Date(timeIntervalSince1970: Double(parts[2]) ?? 0)
                 let activity = Date(timeIntervalSince1970: Double(parts[3]) ?? 0)
                 let command = parts.count > 4 ? String(parts[4]) : ""
+                let height = parts.count > 5 ? Int(parts[5]) ?? 0 : 0
                 // A title may legitimately contain "|", so keep the tail whole.
-                let title = parts.count > 5 ? parts[5...].joined(separator: "|") : ""
+                let title = parts.count > 6 ? parts[6...].joined(separator: "|") : ""
 
-                // Claude Code's last line is its mode bar ("auto mode on…"),
-                // which says nothing about the session. Read enough of the pane
-                // to find the spinner and summarise the real state instead.
+                // An agent's last line is its own chrome — Claude Code's mode
+                // bar ("auto mode on…"), Codex's status bar — and says nothing
+                // about the session. Read enough of the pane to find the
+                // spinner and summarise the real state instead.
+                //
+                // Codex is read from the frame alone here, without the `ps`
+                // check `snapshot` does: one extra round trip per *session* is
+                // a different price from one per open chat, and the textual
+                // test is deliberately narrow. Worst case a node pane gets an
+                // agent-shaped one-line preview and the chat screen, which does
+                // run the `ps` check, corrects it on open.
                 let isClaude = ClaudeCodeRecogniser.isClaudeCode(command: command)
+                let mightBeCodex = CodexRecogniser.isGenericInterpreter(command: command)
+                let deep = isClaude || mightBeCodex
                 let pane = (try? await shell.run(
-                    "\(Self.pathPrefix) tmux capture-pane -p -J -t \(Self.quote(name)) -S -\(isClaude ? 40 : 3) 2>/dev/null || true"
+                    "\(Self.pathPrefix) tmux capture-pane -p -J -t \(Self.quote(name)) -S -\(deep ? 40 : 3) 2>/dev/null || true"
                 )) ?? ""
+
+                // Same screen-vs-scrollback split the chat view makes: state is
+                // read from the visible screen only, or a question answered an
+                // hour ago still reads as "waiting for your answer".
+                let snapshot = PaneSnapshot(text: pane, currentCommand: command, paneTitle: title, paneHeight: height)
+                let screen = snapshot.visibleScreen
 
                 let preview: String
                 if isClaude {
-                    preview = ClaudeCodeRecogniser.status(text: pane, paneTitle: title).summary
+                    preview = ClaudeCodeRecogniser.status(text: screen, paneTitle: title).summary
+                } else if mightBeCodex,
+                          CodexRecogniser.isCodex(command: command, processArgs: "", text: screen) {
+                    preview = CodexRecogniser.status(text: screen, paneTitle: title).summary
                 } else {
                     preview = Self.lastNonEmptyLine(pane)
                 }
@@ -151,6 +173,58 @@ struct TmuxService {
         }
     }
 
+    // MARK: Copy mode (terminal scrollback)
+
+    /// Puts the pane in or out of tmux's copy mode — the only way to see
+    /// anything above the last screen while attached.
+    ///
+    /// **Why this goes over a separate SSH command instead of through the
+    /// attached PTY.** The keyboard route is `prefix` + `[`, and the prefix is
+    /// whatever the user configured: C-b by default, C-a for a large minority,
+    /// anything at all for the rest. Sending 0x02 and hoping is exactly the
+    /// kind of guess this app tries not to make. `tmux copy-mode -t <pane>`
+    /// asks the server directly and is prefix-independent.
+    ///
+    /// Paging, by contrast, *does* go through the PTY: PageUp/PageDown are
+    /// bound to page-up/page-down in both the emacs and vi copy-mode tables,
+    /// so they need no prefix, and routing them through the live channel keeps
+    /// scrolling instant instead of one SSH connection per page.
+    func setCopyMode(_ on: Bool, session name: String, config: SSHConnectionConfig, credential: SSHCredential) async throws {
+        try await withShell(config: config, credential: credential) { shell in
+            let command = on
+                ? "tmux copy-mode -t \(Self.quote(name))"
+                : "tmux send-keys -X -t \(Self.quote(name)) cancel"
+            _ = try await shell.run("\(Self.pathPrefix) \(command) 2>/dev/null || true")
+        }
+    }
+
+    /// Runs one copy-mode command (`history-top`, `history-bottom`, …) by name.
+    /// Used for the jumps that *are* bound differently between the emacs and vi
+    /// key tables, where a keystroke would be a guess but the command name is
+    /// the same either way.
+    func sendCopyModeCommand(_ command: String, session name: String, config: SSHConnectionConfig, credential: SSHCredential) async throws {
+        try await withShell(config: config, credential: credential) { shell in
+            _ = try await shell.run(
+                "\(Self.pathPrefix) tmux send-keys -X -t \(Self.quote(name)) \(Self.quote(command)) 2>/dev/null || true"
+            )
+        }
+    }
+
+    /// `#{pane_in_mode}` — whether the pane is in copy mode right now.
+    ///
+    /// Worth asking rather than assuming: the user can leave copy mode from the
+    /// keyboard (`q`, Escape) without the app hearing about it, which would
+    /// otherwise leave the history bar on screen driving a pane that is back to
+    /// taking input.
+    func isInCopyMode(session name: String, config: SSHConnectionConfig, credential: SSHCredential) async throws -> Bool {
+        try await withShell(config: config, credential: credential) { shell in
+            let out = try await shell.run(
+                "\(Self.pathPrefix) tmux display-message -p -t \(Self.quote(name)) '#{pane_in_mode}' 2>/dev/null || true"
+            )
+            return out.trimmingCharacters(in: .whitespacesAndNewlines) == "1"
+        }
+    }
+
     /// Sends a bare control key (Ctrl-C and friends) without waiting — used to
     /// get a wedged pane back to a prompt from the chat view.
     func sendKeys(_ keys: String, to name: String, config: SSHConnectionConfig, credential: SSHCredential) async throws {
@@ -171,18 +245,36 @@ struct TmuxService {
 
     private static func snapshot(_ shell: RemoteShell, session name: String, lines: Int) async throws -> PaneSnapshot {
         let text = try await shell.run(captureCommand(session: name, lines: lines))
-        // One round trip for all three facts. `pane_title` is last because
-        // Claude Code puts the current task there and it may contain spaces.
+        // One round trip for the pane facts. `pane_title` is last because
+        // Claude Code puts the current task there and it may contain spaces —
+        // and `|` — so the tail is rejoined rather than indexed.
         let info = (try? await shell.run(
-            "\(pathPrefix) tmux display-message -p -t \(quote(name)) '#{alternate_on}|#{pane_current_command}|#{pane_title}' 2>/dev/null || true"
+            "\(pathPrefix) tmux display-message -p -t \(quote(name)) '#{alternate_on}|#{pane_current_command}|#{pane_pid}|#{pane_height}|#{pane_title}' 2>/dev/null || true"
         )) ?? ""
 
         let parts = info.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "|", omittingEmptySubsequences: false)
+        let command = parts.count > 1 ? String(parts[1]) : ""
+        let pid = parts.count > 2 ? String(parts[2]) : ""
+        let height = parts.count > 3 ? Int(parts[3]) ?? 0 : 0
+
+        // A second round trip, but only for panes whose process name explains
+        // nothing. Codex reports as a bare `node`, so without this it is
+        // indistinguishable from any other node process; `claude.exe`, `zsh`
+        // and `vim` need no such help and don't pay for it.
+        var processArgs = ""
+        if CodexRecogniser.isGenericInterpreter(command: command), !pid.isEmpty {
+            processArgs = ((try? await shell.run(
+                "ps -o args= -p \(quote(pid)) 2>/dev/null | head -1 || true"
+            )) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
         return PaneSnapshot(
             text: text,
             alternateScreen: parts.first.map { $0 == "1" } ?? false,
-            currentCommand: parts.count > 1 ? String(parts[1]) : "",
-            paneTitle: parts.count > 2 ? parts[2...].joined(separator: "|") : ""
+            currentCommand: command,
+            paneTitle: parts.count > 4 ? parts[4...].joined(separator: "|") : "",
+            paneHeight: height,
+            processArgs: processArgs
         )
     }
 

@@ -43,17 +43,17 @@ struct Transcript: Hashable, Sendable {
     /// `nil` when the pane really was parsed into turns. Otherwise the reason
     /// the parser gave up and fell back to a single `.raw` block.
     var fallback: Fallback?
-    /// Set when the pane is running Claude Code. The frame is still shown raw —
-    /// we summarise its state, we never re-render its body.
-    var claudeCode: ClaudeCodeStatus?
+    /// Set when the pane is running a coding agent. The frame is still shown
+    /// raw — we summarise its state, we never re-render its body.
+    var agent: AgentStatus?
 
     enum Fallback: Hashable, Sendable {
         /// Nothing in the pane at all.
         case emptyPane
         /// tmux says a full-screen program owns the pane (vim, htop, less).
         case fullScreenProgram(String)
-        /// Claude Code — recognised, summarised, and shown as a live frame.
-        case claudeCode
+        /// A coding agent — recognised, summarised, and shown as a live frame.
+        case agent(AgentKind)
         /// No prompt signature could be inferred from the live prompt line.
         case noPromptFound
         /// A signature was found but it didn't survive the confidence gate.
@@ -68,8 +68,8 @@ struct Transcript: Hashable, Sendable {
             case .fullScreenProgram(let command):
                 let name = command.isEmpty ? "A full-screen program" : "`\(command)`"
                 return "\(name) is running in this pane, so it's showing a screen, not a log. Open the terminal to interact with it."
-            case .claudeCode:
-                return "Live screen from Claude Code. Shown as-is — it wraps its own text, so re-flowing it would break paths and commands."
+            case .agent(let kind):
+                return "Live screen from \(kind.displayName). Shown as-is — it wraps its own text, so re-flowing it would break paths and commands."
             case .noPromptFound:
                 return "No shell prompt could be recognised in this pane. Showing it raw rather than guessing which command produced what."
             case .lowConfidence:
@@ -93,12 +93,54 @@ struct PaneSnapshot: Hashable, Sendable {
     var currentCommand: String
     /// tmux `#{pane_title}` — Claude Code publishes the current task here.
     var paneTitle: String
+    /// tmux `#{pane_height}` — rows in the pane, i.e. how much of `text` is
+    /// the *screen* rather than scrollback. See `visibleScreen`.
+    var paneHeight: Int
+    /// `ps -o args=` for `#{pane_pid}`, e.g. `node /opt/homebrew/bin/codex`.
+    ///
+    /// Only fetched when `currentCommand` is a generic interpreter, because
+    /// that's the only case where the process name doesn't already say what
+    /// the pane is. Empty when it wasn't asked for, or when `ps` said nothing.
+    var processArgs: String
 
-    init(text: String, alternateScreen: Bool = false, currentCommand: String = "", paneTitle: String = "") {
+    init(
+        text: String,
+        alternateScreen: Bool = false,
+        currentCommand: String = "",
+        paneTitle: String = "",
+        paneHeight: Int = 0,
+        processArgs: String = ""
+    ) {
         self.text = text
         self.alternateScreen = alternateScreen
         self.currentCommand = currentCommand
         self.paneTitle = paneTitle
+        self.paneHeight = paneHeight
+        self.processArgs = processArgs
+    }
+
+    /// Just the part of `text` that is on screen right now.
+    ///
+    /// **This distinction is load-bearing, and getting it wrong is a lie the
+    /// user can see.** The capture is 2000 lines deep so the chat transcript
+    /// has history to show, but an agent's *state* — is it working, is it
+    /// waiting for me — is a property of the current screen only. Searching the
+    /// whole capture for "is there a question on screen" finds every question
+    /// the agent ever asked, including ones answered an hour ago, and reports a
+    /// pane that is quietly idle as "waiting for your answer".
+    ///
+    /// The agent's own redraw is what makes this work: an answered prompt is
+    /// gone from the screen and survives only in scrollback. Verified against a
+    /// live pane — `capture-pane -p` and the last `#{pane_height}` lines of
+    /// `capture-pane -p -J -S -2000` came back identical.
+    ///
+    /// Falls back to the whole text when tmux didn't tell us the height, which
+    /// is the old behaviour rather than an empty screen.
+    var visibleScreen: String {
+        guard paneHeight > 0 else { return text }
+        let lines = text.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count > paneHeight else { return text }
+        return lines.suffix(paneHeight).joined(separator: "\n")
     }
 
     private static let shells: Set<String> = [
@@ -184,9 +226,29 @@ enum TranscriptParser {
         // raw frame: Claude hard-wraps to the pane width, so reflowing it into
         // bubbles would corrupt paths and commands (`Pl` + `atforms`).
         if ClaudeCodeRecogniser.isClaudeCode(command: snapshot.currentCommand) {
-            var t = raw(lines, because: .claudeCode)
-            t.claudeCode = ClaudeCodeRecogniser.status(
-                text: snapshot.text,
+            var t = raw(lines, because: .agent(.claudeCode))
+            t.agent = ClaudeCodeRecogniser.status(
+                text: snapshot.visibleScreen,
+                paneTitle: snapshot.paneTitle
+            )
+            return t
+        }
+
+        // Codex, same deal — but it can't be recognised from the process name,
+        // which is a bare `node`. See `CodexRecogniser` for why detection leans
+        // on the process arguments instead. This has to come before the curses
+        // check below for the *opposite* reason to Claude Code: Codex stays on
+        // the normal screen (`alternate_on` is 0), so it would otherwise fall
+        // through to `isShell` being false and get written off as a full-screen
+        // program named `node`.
+        if CodexRecogniser.isCodex(
+            command: snapshot.currentCommand,
+            processArgs: snapshot.processArgs,
+            text: snapshot.text
+        ) {
+            var t = raw(lines, because: .agent(.codex))
+            t.agent = CodexRecogniser.status(
+                text: snapshot.visibleScreen,
                 paneTitle: snapshot.paneTitle
             )
             return t

@@ -1,6 +1,25 @@
 import Foundation
 
-/// What a Claude Code pane is doing right now.
+/// Which coding agent owns a pane.
+///
+/// Kept separate from the recogniser that produced it because the *state* — is
+/// it working, is it waiting for me, is it idle — is the same question for both
+/// agents and the UI asks it the same way. Only the reading of the frame
+/// differs, and that lives in one recogniser per agent.
+enum AgentKind: String, Hashable, Sendable {
+    case claudeCode
+    case codex
+
+    /// What the banner calls it. Shown to the user, so it's the product name.
+    var displayName: String {
+        switch self {
+        case .claudeCode: return "Claude Code"
+        case .codex: return "Codex"
+        }
+    }
+}
+
+/// What an agent pane is doing right now.
 ///
 /// **Why this exists as a separate type.** `TranscriptParser` refuses to slice a
 /// pane while a curses app owns the screen, and that rule is right: `htop` and
@@ -19,7 +38,7 @@ import Foundation
 /// unambiguous* — the status line, the mode line, the pane title — and answers
 /// one question: **is it working, waiting for me, or idle?** The frame itself is
 /// still shown verbatim underneath. We summarise; we never re-render.
-struct ClaudeCodeStatus: Hashable, Sendable {
+struct AgentStatus: Hashable, Sendable {
 
     enum Activity: Hashable, Sendable {
         /// A spinner line is present: Claude is doing something.
@@ -30,8 +49,14 @@ struct ClaudeCodeStatus: Hashable, Sendable {
         case idle
     }
 
+    /// Which agent this describes. Defaults to Claude Code so the existing
+    /// call sites keep reading the way they did.
+    var agent: AgentKind = .claudeCode
     var activity: Activity
-    /// Claude Code publishes the current task in the pane title.
+    /// The current task, when the agent publishes one in the pane title.
+    /// Claude Code does; Codex puts its working directory there instead, which
+    /// is not a task, so its recogniser leaves this `nil` rather than dress a
+    /// path up as one.
     var task: String?
     /// Elapsed time as Claude renders it, e.g. `7m 3s`.
     var elapsed: String?
@@ -46,7 +71,7 @@ struct ClaudeCodeStatus: Hashable, Sendable {
         case .awaitingApproval:
             return "Waiting for your answer"
         case .idle:
-            return task ?? "Claude Code"
+            return task ?? agent.displayName
         case .working(let verb):
             var parts = [verb]
             if let elapsed { parts.append(elapsed) }
@@ -73,7 +98,7 @@ enum ClaudeCodeRecogniser {
     /// - Parameters:
     ///   - text: the `capture-pane` frame.
     ///   - paneTitle: tmux `#{pane_title}`; Claude Code sets it to the task.
-    static func status(text: String, paneTitle: String = "") -> ClaudeCodeStatus {
+    static func status(text: String, paneTitle: String = "") -> AgentStatus {
         let lines = text
             .replacingOccurrences(of: "\r\n", with: "\n")
             .split(separator: "\n", omittingEmptySubsequences: false)
@@ -85,7 +110,7 @@ enum ClaudeCodeRecogniser {
         // leading glyph animates (✽ · ✻ ✢ …), so we anchor on the stable parts
         // instead: an ellipsis, then a parenthesised elapsed time.
         if let spinner = lines.last(where: isSpinnerLine) {
-            return ClaudeCodeStatus(
+            return AgentStatus(
                 activity: .working(verb: verb(in: spinner)),
                 task: task,
                 elapsed: capture(spinner, pattern: #"\((\d+m \d+s|\d+s)"#),
@@ -95,10 +120,10 @@ enum ClaudeCodeRecogniser {
         }
 
         if lines.contains(where: isApprovalPrompt) {
-            return ClaudeCodeStatus(activity: .awaitingApproval, task: task)
+            return AgentStatus(activity: .awaitingApproval, task: task)
         }
 
-        return ClaudeCodeStatus(activity: .idle, task: task)
+        return AgentStatus(activity: .idle, task: task)
     }
 
     // MARK: - Line tests

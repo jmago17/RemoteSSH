@@ -105,10 +105,10 @@ final class ChatSessionModel {
             // Warm the on-device model now, while Claude Code is still busy
             // and nobody is waiting on us. By the time there's a conclusion to
             // summarise, model load and instruction prefill are already paid.
-            if case .working = parsed.claudeCode?.activity {
+            if parsed.agent?.agent == .claudeCode, case .working = parsed.agent?.activity {
                 ClaudeCodeSummariser.prepare()
             }
-            summariseIfNewConclusion(parsed.claudeCode?.activity)
+            summariseIfNewConclusion(parsed.agent)
         } catch {
             errorMessage = friendly(error)
         }
@@ -152,14 +152,14 @@ final class ChatSessionModel {
                 guard let self else { return }
                 // An ordinary shell has no banner to keep honest, so it keeps
                 // the old deal: no polling at all.
-                guard self.transcript.claudeCode != nil else { continue }
+                guard self.transcript.agent != nil else { continue }
                 await self.refresh()
             }
         }
     }
 
     private var pollInterval: Duration {
-        if case .working = transcript.claudeCode?.activity {
+        if case .working = transcript.agent?.activity {
             return Self.workingPollInterval
         }
         return Self.restingPollInterval
@@ -178,7 +178,13 @@ final class ChatSessionModel {
     /// never triggered anything. A persisted digest instead answers "have I
     /// summarised *this text* already", which is true whether the user saw
     /// the transition, missed it, or the app was relaunched entirely.
-    private func summariseIfNewConclusion(_ activity: ClaudeCodeStatus.Activity?) {
+    private func summariseIfNewConclusion(_ status: AgentStatus?) {
+        // Claude Code only. `lastConclusion` finds the last turn by Claude
+        // Code's `⏺` marker; Codex uses `•`, so on a Codex pane this would
+        // summarise whatever the tail of the frame happened to be and present
+        // it as a conclusion. No verified Codex extractor yet, so no card.
+        guard status?.agent == .claudeCode else { return }
+        let activity = status?.activity
         guard case .idle = activity else {
             // A fresh command invalidates whatever the last summary was about.
             if case .working = activity, conclusionSummary != nil {
@@ -302,7 +308,7 @@ final class ChatSessionModel {
             let parsed = await TranscriptParser.parsed(snapshot)
             transcript = parsed
             errorMessage = nil
-            summariseIfNewConclusion(parsed.claudeCode?.activity)
+            summariseIfNewConclusion(parsed.agent)
         } catch {
             errorMessage = friendly(error)
             // Give the command back rather than swallowing it.

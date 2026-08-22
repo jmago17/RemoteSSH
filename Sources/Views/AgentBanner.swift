@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// A live status banner for a pane running Claude Code.
+/// A live status banner for a pane running a coding agent.
 ///
 /// The deliberate scope: this reports **state**, not content. It answers the
 /// question you actually have when you pull the phone out — *is it working, is
 /// it done, does it need me?* — and leaves Claude Code's own frame to render
 /// itself underneath, verbatim.
-struct ClaudeCodeBanner: View {
-    let status: ClaudeCodeStatus
+struct AgentBanner: View {
+    let status: AgentStatus
     var onOpenTerminal: () -> Void
 
     var body: some View {
@@ -74,10 +74,11 @@ struct ClaudeCodeBanner: View {
     }
 
     private var headline: String {
+        let name = status.agent.displayName
         switch status.activity {
-        case .working(let verb): return "Claude Code · \(verb)"
-        case .awaitingApproval: return "Claude Code is waiting for you"
-        case .idle: return "Claude Code · idle"
+        case .working(let verb): return "\(name) · \(verb)"
+        case .awaitingApproval: return "\(name) is waiting for you"
+        case .idle: return "\(name) · idle"
         }
     }
 
