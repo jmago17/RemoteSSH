@@ -157,7 +157,17 @@ enum ClaudeCodeSummariser {
             // the same conclusion summarise the same way twice — which matters
             // because `ChatSessionModel` caches by content digest, and a card
             // that silently rewords itself on a re-read reads as a bug.
-            samplingMode: .greedy,
+            //
+            // `sampling:` on purpose, even though the iOS 27 SDK deprecates it
+            // in favour of `samplingMode:` and warns about it here. Xcode Cloud
+            // builds on an older Xcode than the beta this Mac runs, and that
+            // SDK has *only* `sampling:` — using the new label compiles locally
+            // and fails CI with "Incorrect argument label in call (have
+            // 'samplingMode:…', expected 'sampling:…')". The deprecated label
+            // exists in both SDKs; the new one doesn't. Swap it back only once
+            // the Xcode Cloud workflow is on a matching Xcode version, or CI
+            // breaks again.
+            sampling: .greedy,
             maximumResponseTokens: responseTokenLimit
         )
 

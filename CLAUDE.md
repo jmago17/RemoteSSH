@@ -537,3 +537,49 @@ Dos trampas de `swiftc` sueltas: el fichero del arnes **debe llamarse
 **NO verificado**: nada de esto se ha visto en un iPhone. Compila y pasa los
 arneses; la barra de historial, el foco del teclado y el banner de Codex no se
 han tocado con un dedo.
+
+### Xcode Cloud compila con un SDK MAS VIEJO que el Mac
+
+Build fallido el 2026-08-22 sobre `c1c05be`:
+
+```
+ClaudeCodeSummariser.swift:155
+Incorrect argument label in call
+(have 'samplingMode:maximumResponseTokens:', expected 'sampling:maximumResponseTokens:')
+```
+
+**No era un error de codigo.** En el SDK de iOS 27 beta que hay en el Mac
+conviven los dos inits de `GenerationOptions` (comprobado en el
+`.swiftinterface` del SDK, no de memoria):
+
+```swift
+@available(*, deprecated, renamed: "samplingMode")
+public init(sampling: SamplingMode?, temperature: Double? = nil, maximumResponseTokens: Int? = nil)
+public init(samplingMode: SamplingMode? = nil, temperature: Double? = nil, maximumResponseTokens: Int? = nil)
+```
+
+Xcode Cloud corre un Xcode anterior, cuyo SDK tiene **solo `sampling:`**. Por eso
+compilaba en local y moria en CI.
+
+**Parche aplicado**: usar `sampling:` (deprecado en el SDK nuevo, presente en
+ambos). NO devolverlo a `samplingMode:` hasta que el workflow de Xcode Cloud
+este en una version de Xcode que lo tenga, o CI vuelve a romperse.
+
+**Arreglo de fondo (pendiente, lo tiene que hacer Josu)**: en App Store Connect
+→ el workflow → Environment → subir la version de Xcode a la beta que coincida
+con `/Applications/Xcode-beta.app` (27.0, build 27A5194q). La version NO se
+configura desde el repo, asi que no se puede arreglar por commit.
+
+**Comprobado que el resto SI vale**: `LanguageModelSession.prewarm(promptPrefix:)`
+NO lleva `@available(iOS 27)` propio — hereda el `@available(iOS 26.0)` de la
+clase, asi que existe tambien en el SDK viejo. Era el otro candidato a romper y
+no lo es.
+
+**Como comprobar la firma real de una API del SDK** (en vez de suponerla):
+
+```sh
+D=/Applications/Xcode-beta.app/Contents/Developer
+grep -n "struct GenerationOptions" -A 30 \
+  $D/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/System/Library/Frameworks/\
+FoundationModels.framework/Modules/FoundationModels.swiftmodule/arm64e-apple-ios.swiftinterface
+```
