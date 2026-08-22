@@ -620,3 +620,51 @@ APP=/tmp/<dd>/Build/Products/Debug-iphonesimulator/RemoteSSH.app
 grep -rioE "mac[a-z]*" "$APP/Metadata.appintents/"     # debe salir vacio
 grep -oE "Sends a command[^\"]*" "$APP/Metadata.appintents/extract.actionsdata"
 ```
+
+### "Preparing build for App Store Connect failed" tras renombrar el bundle id
+
+Sintoma: Xcode Cloud **compila y archiva bien**, y muere en el ultimo paso con
+ese texto y **ningun detalle mas** en el log.
+
+**Un App ID NO es un app record.** Son dos cosas en dos sitios:
+
+- **App ID** (developer.apple.com, Certificates/Identifiers): lo crea Xcode solo
+  al firmar. El de `com.maromeapps.RemoteSSH` **existe** — se creo el 2026-08-22
+  a las 04:29Z, al hacer el rename — y tiene las mismas capabilities que el
+  viejo, iCloud incluido.
+- **App record** (App Store Connect): hay que crearlo a mano. El que existe
+  (App Apple ID **6804001421**) esta atado a **`com.danobat.RemoteSSH`**, y
+  **Apple no deja cambiarle el bundle id** una vez creado.
+
+Por eso el build 10 (bundle viejo) llego a validarse — y fue rechazado por
+ITMS-90626 — mientras que los de despues del rename mueren en el paso que los
+sube: no hay app a la que subirlos.
+
+**Como se descarto lo demas, con datos y no por eliminacion a ojo:**
+
+```sh
+P=~/Library/Developer/Xcode/UserData/Provisioning\ Profiles
+for f in "$P"/*.mobileprovision; do
+  D=$(security cms -D -i "$f")
+  echo "$D" | plutil -extract Entitlements.application-identifier raw -
+  echo "$D" | plutil -extract Entitlements xml1 -o - - | grep ubiquity
+  echo "$D" | plutil -extract CreationDate raw -
+done
+```
+
+→ el App ID nuevo existe y lleva `ubiquity-kvstore-identifier`, asi que ni
+faltaba el identifier ni le faltaba la capability de iCloud.
+
+**Arreglo (solo desde App Store Connect, no por commit)**: crear un app record
+nuevo con bundle id `com.maromeapps.RemoteSSH` (Apps → + → New App; el bundle id
+ya sale en el desplegable porque el App ID existe).
+
+**Trampa al crearlo**: Apple no admite dos apps con el mismo nombre en la misma
+cuenta, y el record viejo tiene "RemoteSSH" cogido. O se le pone otro nombre, o
+primero se borra el viejo (App Information → Delete App), que solo se puede si
+nunca se publico.
+
+**Nota de versiones**: `MARKETING_VERSION` es `0.1.0` y el record viejo hablaba
+de "Version 1.0". Para TestFlight da igual (el build entra por su numero), pero
+si el record nuevo se crea como 1.0 y el binario dice 0.1.0, ese build no encaja
+en esa version de App Store. Alinear si se va a publicar.
