@@ -6,6 +6,11 @@ import SwiftTerm
 struct TerminalHostView: UIViewRepresentable {
     let session: TerminalSession
     var fontSize: CGFloat = 13
+    /// Whether the terminal should hold first responder — i.e. show the
+    /// software keyboard. `TerminalScreen` turns this off while the expanded
+    /// key panel is up, since the two would otherwise fight for the same
+    /// bottom half of the screen.
+    var wantsKeyboard: Bool = true
 
     func makeUIView(context: Context) -> TerminalView {
         let terminalView = TerminalView(frame: .zero)
@@ -38,14 +43,38 @@ struct TerminalHostView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: TerminalView, context: Context) {
-        // Focus the terminal once so the keyboard appears.
-        if !context.coordinator.didFocus {
-            context.coordinator.didFocus = true
-            DispatchQueue.main.async { _ = uiView.becomeFirstResponder() }
-        }
+        syncKeyboard(uiView, coordinator: context.coordinator)
         // Apply font-size changes (reflows the PTY via sizeChanged).
         if abs(uiView.font.pointSize - fontSize) > 0.1 {
             uiView.font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        }
+    }
+
+    /// Drives first responder from `wantsKeyboard`, and **only on a change**.
+    ///
+    /// Two things this deliberately does not do. It doesn't resign via
+    /// `UIApplication.sendAction(_:to:nil…)`: that fires at whatever holds
+    /// first responder at the time, which is a guess, whereas the terminal
+    /// view is the thing we actually mean. And it doesn't re-assert focus on
+    /// every `updateUIView`: SwiftUI re-runs this for unrelated reasons (a
+    /// font change, a status-rail update), so an unconditional
+    /// `becomeFirstResponder` would yank the keyboard back up seconds after
+    /// the user dismissed it by some other route.
+    ///
+    /// The initial focus falls out of the same rule: `appliedKeyboard` starts
+    /// `nil`, so the first pass is a change and the keyboard appears.
+    /// `DispatchQueue.main.async` because responder changes during a SwiftUI
+    /// update pass fight the layout that is still in flight.
+    private func syncKeyboard(_ uiView: TerminalView, coordinator: Coordinator) {
+        guard coordinator.appliedKeyboard != wantsKeyboard else { return }
+        coordinator.appliedKeyboard = wantsKeyboard
+        let wants = wantsKeyboard
+        DispatchQueue.main.async {
+            if wants {
+                _ = uiView.becomeFirstResponder()
+            } else {
+                _ = uiView.resignFirstResponder()
+            }
         }
     }
 
@@ -54,7 +83,10 @@ struct TerminalHostView: UIViewRepresentable {
     final class Coordinator: TerminalViewDelegate {
         let session: TerminalSession
         weak var terminalView: TerminalView?
-        var didFocus = false
+        /// Last value of `wantsKeyboard` actually pushed at the responder
+        /// chain. `nil` until the first pass, which is what makes that pass
+        /// count as a change and give the terminal its initial focus.
+        var appliedKeyboard: Bool?
 
         init(session: TerminalSession) { self.session = session }
 

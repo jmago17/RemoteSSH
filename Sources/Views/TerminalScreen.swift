@@ -29,6 +29,13 @@ struct TerminalScreen: View {
     @State private var editingSlot: KeyRailSlot?
     /// When true the expanded key panel replaces the software keyboard.
     @State private var showAllKeys = false
+    /// When true the pane is in tmux copy mode and the key rail is replaced by
+    /// the history bar. Mirrors the pane's real state, which the user can also
+    /// change from the keyboard — see `syncCopyMode`.
+    @State private var inCopyMode = false
+    /// Set while an SSH round trip to enter/leave copy mode is in flight, so
+    /// the bar can't be double-driven.
+    @State private var copyModeBusy = false
     /// Slot assignments, mirrored so the rail redraws when the picker writes.
     @AppStorage(KeyRailSlot.one.storageKey) private var slot1Raw = KeyRailSlot.one.default.rawValue
     @AppStorage(KeyRailSlot.two.storageKey) private var slot2Raw = KeyRailSlot.two.default.rawValue
@@ -62,18 +69,103 @@ struct TerminalScreen: View {
         )
     }
 
-    /// Swaps the software keyboard for the full key catalog (and back). The
-    /// terminal keeps first responder either way, so typed input still lands.
+    /// Swaps the software keyboard for the full key catalog (and back).
+    ///
+    /// The swap is driven by `TerminalHostView(wantsKeyboard:)` rather than
+    /// from here: this used to resign first responder with a blind
+    /// `sendAction(_:to:nil…)` on the way in and do nothing at all on the way
+    /// out, so the keyboard never came back when the panel closed. Both
+    /// directions now follow from `showAllKeys`.
     private func toggleAllKeys() {
         withAnimation(.snappy(duration: 0.22)) {
             showAllKeys.toggle()
         }
-        if showAllKeys {
-            UIApplication.shared.sendAction(
-                #selector(UIResponder.resignFirstResponder),
-                to: nil, from: nil, for: nil
-            )
+    }
+
+    // MARK: Scrollback
+
+    /// Enters or leaves tmux copy mode over a short-lived SSH command.
+    ///
+    /// Not through the PTY: the keyboard route into copy mode is `prefix` +
+    /// `[`, and the prefix is whatever the user set it to. Paging, once in,
+    /// *does* go through the PTY — see `historyBar`.
+    private func setCopyMode(_ on: Bool) {
+        guard !copyModeBusy, let credential = SettingsStore().loadCredential(for: model.config) else { return }
+        copyModeBusy = true
+        let config = model.config
+        let name = sessionName
+        Task {
+            do {
+                try await TmuxService().setCopyMode(on, session: name, config: config, credential: credential)
+                withAnimation(.snappy(duration: 0.2)) { inCopyMode = on }
+            } catch {
+                // Leave the bar as it was: a failed enter shouldn't strand the
+                // user in a history bar driving a pane that never entered.
+            }
+            copyModeBusy = false
         }
+    }
+
+    /// Runs a named copy-mode command. Used for the two jumps whose *keys*
+    /// differ between the emacs and vi copy-mode tables (`g`/`M-<`) but whose
+    /// command names don't.
+    private func historyJump(_ command: String) {
+        guard let credential = SettingsStore().loadCredential(for: model.config) else { return }
+        let config = model.config
+        let name = sessionName
+        Task {
+            try? await TmuxService().sendCopyModeCommand(command, session: name, config: config, credential: credential)
+        }
+    }
+
+    /// Re-reads `#{pane_in_mode}`, because the user can leave copy mode from
+    /// the keyboard (`q`, Escape) without the app hearing about it — which
+    /// would otherwise leave a history bar on screen driving a pane that is
+    /// back to taking ordinary input.
+    private func syncCopyMode() {
+        guard let credential = SettingsStore().loadCredential(for: model.config) else { return }
+        let config = model.config
+        let name = sessionName
+        Task {
+            guard let live = try? await TmuxService().isInCopyMode(session: name, config: config, credential: credential),
+                  live != inCopyMode
+            else { return }
+            withAnimation(.snappy(duration: 0.2)) { inCopyMode = live }
+        }
+    }
+
+    /// Replaces the key rail while the pane is in copy mode. Paging goes out
+    /// through the live PTY (instant, and PageUp/PageDown are bound the same
+    /// way in both copy-mode key tables); the two end-stops go out as named
+    /// commands, which is the part that isn't the same in both.
+    private var historyBar: some View {
+        HStack(spacing: isRegular ? 7 : 6) {
+            KeyCap(symbol: "arrow.up.to.line", spoken: "Jump to the oldest line", stretches: !isRegular) {
+                historyJump("history-top")
+            }
+            KeyCap(symbol: "chevron.up", spoken: "Page up", stretches: !isRegular) {
+                terminal?.sendKey(.pageUp)
+            }
+            KeyCap(symbol: "chevron.down", spoken: "Page down", stretches: !isRegular) {
+                terminal?.sendKey(.pageDown)
+            }
+            KeyCap(symbol: "arrow.down.to.line", spoken: "Jump back to the live end", stretches: !isRegular) {
+                historyJump("history-bottom")
+            }
+            KeyCap("done", spoken: "Leave history", stretches: !isRegular) {
+                setCopyMode(false)
+            }
+
+            if isRegular { Spacer(minLength: 0) }
+        }
+        .padding(.horizontal, isRegular ? 14 : 12)
+        .padding(.vertical, 9)
+        .background(Theme.surface)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Theme.hairline).frame(height: 1)
+        }
+        .disabled(copyModeBusy)
+        .opacity(copyModeBusy ? 0.4 : 1)
     }
 
     var body: some View {
@@ -85,7 +177,11 @@ struct TerminalScreen: View {
 
                 if let terminal {
                     // A new id on reconnect forces a fresh SwiftTerm view + attach.
-                    TerminalHostView(session: terminal, fontSize: CGFloat(fontSize))
+                    TerminalHostView(
+                        session: terminal,
+                        fontSize: CGFloat(fontSize),
+                        wantsKeyboard: !showAllKeys && !inCopyMode
+                    )
                         .id(generation)
                         .padding(.horizontal, isRegular ? 14 : 6)
                         .padding(.top, isRegular ? 10 : 6)
@@ -99,9 +195,13 @@ struct TerminalScreen: View {
                 }
             }
 
-            keyRail
+            if inCopyMode {
+                historyBar
+            } else {
+                keyRail
+            }
 
-            if showAllKeys {
+            if showAllKeys && !inCopyMode {
                 ExpandedKeyPanel(
                     send: { terminal?.sendKey($0) },
                     dismiss: { withAnimation(.snappy(duration: 0.22)) { showAllKeys = false } }
@@ -132,6 +232,11 @@ struct TerminalScreen: View {
                     }
                     Section {
                         Button {
+                            setCopyMode(true)
+                        } label: { Label("Browse History", systemImage: "clock.arrow.circlepath") }
+                        .disabled(inCopyMode || !isLive)
+
+                        Button {
                             reconnect()
                         } label: { Label("Reconnect", systemImage: "arrow.clockwise") }
                         .keyboardShortcut("r", modifiers: [.command, .shift])
@@ -146,11 +251,19 @@ struct TerminalScreen: View {
             model.markRead(sessionName)
             setup()
         }
-        .onDisappear { terminal?.stop() }
+        .onDisappear {
+            // Don't leave the pane parked in copy mode for whoever attaches
+            // next: it looks frozen, since it stops following the live output.
+            if inCopyMode { setCopyMode(false) }
+            terminal?.stop()
+        }
         .onChange(of: scenePhase) { _, phase in
             // iOS suspends the socket in the background; re-attach on return so
             // the pane catches up near-seamlessly.
             if phase == .active, case .closed = terminal?.phase { reconnect() }
+            // The pane may have left copy mode while we were away (`q` from a
+            // desk keyboard, or a program taking the screen back).
+            if phase == .active, inCopyMode { syncCopyMode() }
         }
     }
 
