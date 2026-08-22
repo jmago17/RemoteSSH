@@ -8,6 +8,8 @@
 - Carpeta en el Mac: `~/Documents/Developer/RemoteSSH`
 - Proyecto: `RemoteSSH.xcodeproj`
 - Scheme: `RemoteSSH`
+- Bundle id: `com.maromeapps.RemoteSSH` (era `com.danobat.*` hasta
+  2026-08-22; ver la seccion del rename al final)
 
 Repo **publico** en GitHub. No commitear nada sensible.
 
@@ -32,19 +34,6 @@ Antes de fiarte de cualquiera de los dos ficheros, contrasta con
 
 ## Pendiente
 
-- **`gh auth login -h github.com` en el Mac**: el token de `gh` para `jmago17`
-  esta caducado. El push de hoy se hizo con `GITHUB_TOKEN` del entorno de Minis,
-  **sin dejar credencial en el Mac** → un `git push` local pedira auth.
-- **Untrackear `.wrangler/cache/pages.json`** y añadir `.wrangler/` a
-  `.gitignore`. Es estado local de Cloudflare Worker, sin credenciales
-  (verificado), pero no deberia estar versionado. Sigue trackeado a
-  2026-08-20. Comando:
-  ```sh
-  cd ~/Documents/Developer/RemoteSSH
-  git rm -r --cached .wrangler
-  printf '\n## Cloudflare Worker local state\n.wrangler/\n' >> .gitignore
-  git commit -m "chore: untrack .wrangler local state"
-  ```
 - **Verificar en hardware real** (no se pudo por simulador, ver Trabas):
   - menu de configuracion de slot con pulsacion larga
   - altura del `ExpandedKeyPanel` (260pt telefono / 300pt iPad)
@@ -365,3 +354,60 @@ xcrun simctl launch <UDID> com.danobat.WidthPreview after    # ancho medido
 compatibilidad a 320×568 (un iPhone SE virtual) y mide una columna de 320pt en
 un telefono de 402pt — media hora perdida persiguiendo un fantasma. En
 `project.yml` del arnes: `INFOPLIST_KEY_UILaunchScreen_Generation: "YES"`.
+
+## Sesion 2026-08-22: bundle id `com.danobat.*` → `com.maromeapps.*`
+
+Motivo: danobat es la empresa donde trabaja Josu, no quien publica la app.
+
+**Los seis sitios donde vive la identidad.** Un `sed` sobre `com.danobat.`
+(con punto final) **se deja uno**: `bundleIdPrefix: com.danobat` en
+`project.yml` no lleva punto detras. Lista completa:
+
+| Fichero | Que hay |
+|---|---|
+| `project.yml` | `bundleIdPrefix`, `PRODUCT_BUNDLE_IDENTIFIER`, `CFBundleURLName` |
+| `Sources/Services/KeychainStore.swift` | `service = "com.maromeapps.RemoteSSH.credentials"` |
+| `scripts/com.maromeapps.remotessh.notify.plist` | el `Label` **y el nombre del fichero** |
+| `docs/notifications-brrr.md` | rutas del `cp` / `launchctl` |
+| `README.md` | identidad y ruta del plist |
+| `Sources/Views/DesignSystem.swift` | `danobat-api` era el hostname de ejemplo del doc-comment de `SessionTile` |
+
+`RemoteSSH-Info.plist` y `project.pbxproj` **no se editan a mano**: los
+regenera `xcodegen generate` desde `project.yml`. Script reproducible en
+`<scratchpad>/rename_bundle.sh` (idempotente, imprime las menciones que
+sobrevivan).
+
+**`xcodegen generate` NO se lleva por delante el `Package.resolved`** que vive
+dentro del `.xcodeproj` (verificado: identico a la copia de `swiftpm/` despues
+de regenerar). O sea que el arreglo de Xcode Cloud del 2026-08-21 sobrevive a
+un regenerate.
+
+**Verificado**: `BUILD SUCCEEDED` en simulador y `CFBundleIdentifier` leido del
+`RemoteSSH.app` compilado, no solo del yml:
+
+```sh
+/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" \
+  /tmp/rssh_rename/Build/Products/Debug-iphonesimulator/RemoteSSH.app/Info.plist
+# com.maromeapps.RemoteSSH
+```
+
+**Lo que se pierde al instalarla** (iOS la trata como app nueva): credenciales
+del Keychain, los hosts (el KVS de iCloud se indexa por `CFBundleIdentifier`
+via `com.apple.developer.ubiquity-kvstore-identifier`) y el pinning TOFU de
+host-keys. **Borrar la app vieja del iPhone antes de instalar** o las dos se
+pelean por el scheme `remotessh://`.
+
+**Firma en dispositivo**: `CODE_SIGN_STYLE: Automatic` con team `ES2766ARHJ`.
+El App ID `com.maromeapps.RemoteSSH` no existe todavia en el portal; lo crea
+Xcode al hacer **Run manual** (por terminal el llavero se re-bloquea y Josu
+prohibio que se le pida la contraseña).
+
+**El LaunchAgent de notificaciones del repo es solo plantilla.** No hay ningun
+`~/Library/LaunchAgents/*remotessh*` instalado ni proceso `tmux-notify.sh`
+corriendo (verificado con `launchctl list` y `pgrep`), asi que el rename del
+plist no rompio nada en marcha. Las notificaciones que Josu ve vienen de los
+hooks de Claude Code, no de este watcher.
+
+**Corregido respecto a notas anteriores**: `gh` **si** tiene credencial en el
+Mac (`gh auth status` → `jmago17`, keyring, scopes `repo`/`workflow`). El
+pendiente "token caducado" ya no aplica.
