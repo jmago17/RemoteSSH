@@ -701,25 +701,41 @@ subida**, y mientras no se contesten el build **no llega a TestFlight**. Puesta
 en `project.yml` → `info.properties`, sale al `Info.plist` y se acaban las
 preguntas.
 
-Declarado **`false`** (= no usa cifrado mas alla de formas exentas). La base, y
-conviene que quede escrita porque es una afirmacion legal, no una opcion de
-build:
+Declarado **`false`**. **Decision consciente de Josu (2026-08-23), no una
+deduccion de la tabla de Apple** — que dice lo contrario, y conviene que quede
+escrito tal cual para que nadie lo "arregle" creyendo que fue un descuido:
 
-- RemoteSSH **no implementa criptografia propia**. Llama a **CryptoKit** de
-  Apple (`SHA256`, `Curve25519`) y enlaza **swift-nio-ssh** / **swift-crypto**,
-  que son librerias open source de la propia Apple con algoritmos SSH estandar
-  (Ed25519, AES, ECDH).
-- La linea que traza Apple es: el cifrado **del sistema operativo** es exento,
-  el **propietario** no. Aqui no hay nada propietario.
+| Cifrado que usa la app | Documentacion que pide Apple |
+|---|---|
+| Limitado al del sistema operativo de Apple | **Ninguna** |
+| **Estandar de la industria, NO provisto por el OS** | **Declaracion francesa de cifrado** |
+| Algoritmos propietarios | CCATS + declaracion francesa |
 
-**Es una declaracion de Josu, no del codigo.** Y usar cifrado exento puede
-seguir acarreando el *self-classification report* anual ante EE.UU.
+**RemoteSSH cae en la fila del medio, no en la primera.** El canal SSH lo cifra
+`swift-nio-ssh` **enlazada en la app**: algoritmos estandar (Ed25519, AES,
+ECDH), pero no los provee iOS. La primera fila es para apps que solo usan HTTPS
+por `URLSession`, Keychain y Data Protection — aunque la app tambien llame a
+`CryptoKit`, el cifrado del transporte no sale del OS.
+
+Las cinco exenciones del cuestionario de ASC tampoco encajan: medica, propiedad
+intelectual, **solo autenticacion/firma/descifrado**, banca, compresion fija.
+SSH no se limita a autenticar, cifra toda la sesion.
+
+**Contexto que sostiene la decision**: la declaracion francesa se exige por
+distribuir en Francia, y esto va a **TestFlight interno**, al iPhone de Josu. No
+hay distribucion publica.
+
+**Si algun dia se publica de verdad**, esto hay que revisarlo: `true` +
+subir la declaracion francesa en App Store Connect (App Information → Export
+Compliance). Es un formulario de Apple, una sola vez, no por build. El CCATS
+solo haria falta con cripto propietaria, que aqui no hay.
+
+**Lo que la app usa de verdad** (por si cambia y hay que reevaluar): `CryptoKit`
+(`SHA256`, `Curve25519`) y las librerias open source de Apple `swift-nio-ssh` /
+`swift-crypto`. Ninguna criptografia propia.
 
 Verificado donde importa — el binario, no el yml:
 
 ```sh
 /usr/libexec/PlistBuddy -c "Print :ITSAppUsesNonExemptEncryption" <app>/Info.plist   # false
 ```
-
-Si algun dia se declarara `true`, hay que subir la documentacion a App Store
-Connect y poner el codigo que devuelven en `ITSEncryptionExportComplianceCode`.
