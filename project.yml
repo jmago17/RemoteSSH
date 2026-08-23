@@ -47,6 +47,22 @@ targets:
       path: RemoteSSH-Info.plist
       properties:
         CFBundleDisplayName: RemoteSSH
+        # Export compliance. Declared here so App Store Connect stops asking
+        # the encryption questions on every single upload — unanswered, they
+        # hold the build back from TestFlight.
+        #
+        # `false` says the app uses no encryption beyond forms exempt from
+        # export documentation. The basis: RemoteSSH implements no crypto of
+        # its own. It calls Apple's CryptoKit (SHA256, Curve25519) and links
+        # swift-nio-ssh / swift-crypto — Apple's own open-source libraries
+        # doing standard SSH algorithms. Apple's line is that OS-provided
+        # encryption is exempt while *proprietary* encryption is not, and
+        # there is none of the latter here.
+        #
+        # Note this is a legal declaration, not a build setting: it is Josu's
+        # to make, and using exempt encryption can still carry a US year-end
+        # self-classification reporting duty.
+        ITSAppUsesNonExemptEncryption: false
         NSLocalNetworkUsageDescription: "RemoteSSH connects to your Mac over SSH to list and attach to tmux sessions."
         UILaunchScreen: {}
         UIApplicationSceneManifest:

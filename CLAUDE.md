@@ -693,3 +693,33 @@ incrementa Xcode Cloud (por eso el ultimo iba por el 10).
 
 **El record viejo se borro el 2026-08-22** — solo habia uno, asi que el nombre
 "RemoteSSH" queda libre para el nuevo.
+
+### Export compliance: `ITSAppUsesNonExemptEncryption`
+
+Sin esta clave, App Store Connect hace las preguntas de cifrado **en cada
+subida**, y mientras no se contesten el build **no llega a TestFlight**. Puesta
+en `project.yml` → `info.properties`, sale al `Info.plist` y se acaban las
+preguntas.
+
+Declarado **`false`** (= no usa cifrado mas alla de formas exentas). La base, y
+conviene que quede escrita porque es una afirmacion legal, no una opcion de
+build:
+
+- RemoteSSH **no implementa criptografia propia**. Llama a **CryptoKit** de
+  Apple (`SHA256`, `Curve25519`) y enlaza **swift-nio-ssh** / **swift-crypto**,
+  que son librerias open source de la propia Apple con algoritmos SSH estandar
+  (Ed25519, AES, ECDH).
+- La linea que traza Apple es: el cifrado **del sistema operativo** es exento,
+  el **propietario** no. Aqui no hay nada propietario.
+
+**Es una declaracion de Josu, no del codigo.** Y usar cifrado exento puede
+seguir acarreando el *self-classification report* anual ante EE.UU.
+
+Verificado donde importa — el binario, no el yml:
+
+```sh
+/usr/libexec/PlistBuddy -c "Print :ITSAppUsesNonExemptEncryption" <app>/Info.plist   # false
+```
+
+Si algun dia se declarara `true`, hay que subir la documentacion a App Store
+Connect y poner el codigo que devuelven en `ITSEncryptionExportComplianceCode`.
