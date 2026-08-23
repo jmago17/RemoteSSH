@@ -43,26 +43,43 @@ enum CodexRecogniser {
     ///
     /// - Parameters:
     ///   - command: tmux `#{pane_current_command}` — `node` for Codex.
-    ///   - processArgs: `ps -o args=` for `#{pane_pid}`, when it could be read.
-    ///     This is the reliable signal; everything else is a fallback.
-    ///   - text: the captured frame, used only when `processArgs` is empty.
-    static func isCodex(command: String, processArgs: String, text: String) -> Bool {
+    ///   - foregroundProcesses: `ps -t <pane_tty> -o stat=,args=`, when it
+    ///     could be read. This is the reliable signal; the frame is a fallback.
+    ///   - text: the captured frame.
+    static func isCodex(command: String, foregroundProcesses: String, text: String) -> Bool {
         // Only a generic interpreter can be Codex in disguise. This guard is
         // what stops the textual fallback from ever firing on, say, a shell
         // that happens to be printing Codex's own output in a log.
         guard isGenericInterpreter(command: command) else { return false }
 
-        if !processArgs.isEmpty {
-            return mentionsCodexBinary(processArgs)
-        }
+        // Note the fallback runs whenever `ps` didn't *prove* it, not only when
+        // `ps` said nothing. The first version returned `ps`'s verdict outright
+        // whenever its output was non-empty, so once `ps` started answering
+        // `-zsh` — see `PaneSnapshot.foregroundProcesses` — a real Codex pane
+        // was actively ruled out instead of falling through to the frame.
+        if mentionsCodexBinary(in: foregroundProcesses) { return true }
         return looksLikeCodexFrame(text)
     }
 
-    /// `node /opt/homebrew/bin/codex` → true; `node codex-server.js` → false.
-    /// Matched as a whole path component so a project directory called
-    /// `codex-web` can't pass for the binary.
-    private static func mentionsCodexBinary(_ args: String) -> Bool {
-        args.range(of: #"(^|[/\s])codex(\s|$)"#, options: .regularExpression) != nil
+    /// Scans `ps -t <tty> -o stat=,args=` for the Codex binary.
+    ///
+    /// Only lines whose state carries `+` count: that marks the terminal's
+    /// foreground process group, the same notion tmux reports as
+    /// `pane_current_command`. Without it, a long-lived helper that merely
+    /// inherited the tty (Codex's own MCP servers keep several around) would
+    /// still answer "Codex" after Codex itself had exited.
+    ///
+    /// `codex` is matched as a whole path component, so neither a directory
+    /// called `codex-web` nor the `codex-code-mode-host` helper passes for it.
+    private static func mentionsCodexBinary(in psOutput: String) -> Bool {
+        for line in psOutput.split(separator: "\n") {
+            let parts = line.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+            guard parts.count == 2, parts[0].contains("+") else { continue }
+            if parts[1].range(of: #"(^|[/\s])codex(\s|$)"#, options: .regularExpression) != nil {
+                return true
+            }
+        }
+        return false
     }
 
     /// Last-resort recognition from the frame, for when `ps` wasn't available.
@@ -80,8 +97,12 @@ enum CodexRecogniser {
         if lines.contains(where: { $0.contains("OpenAI Codex (") }) { return true }
 
         let hasComposer = lines.contains { $0.hasPrefix("›") }
+        // `gpt-5.6-terra medium · ~` — the path is whatever Codex shows, and a
+        // real pane in the home directory renders it as `~`, not as an
+        // absolute path. Requiring `/` here is what made this fallback miss the
+        // first live Codex session it ever saw.
         let hasStatusBar = lines.last(where: { !$0.isEmpty })
-            .map { $0.range(of: #"\s·\s/"#, options: .regularExpression) != nil } ?? false
+            .map { $0.range(of: #"\s·\s[~/]"#, options: .regularExpression) != nil } ?? false
         return hasComposer && hasStatusBar
     }
 

@@ -422,14 +422,48 @@ un `node` puede ser cualquier cosa. Con `alternate_on=0` (Codex NO usa pantalla
 alternativa), el pane caia en `isShell == false` → *"a full-screen program
 called node is running in this pane"*.
 
-**Deteccion determinista, no heuristica**: `ps -o args= -p #{pane_pid}` devuelve
-`node /opt/homebrew/bin/codex`. `TmuxService.snapshot` solo paga ese segundo
-round trip cuando el comando es un interprete generico (`node`, `bun`, `deno`,
-`python`, `python3`); `claude.exe`, `zsh` o `vim` ya se explican solos. El test
-textual de `CodexRecogniser.looksLikeCodexFrame` es solo el plan B para cuando
-`ps` no dice nada, y exige DOS marcas (composer `›` + status bar `modelo · /ruta`
-como ultima linea no vacia) porque cualquiera de las dos sola da falsos
-positivos.
+**Deteccion determinista, no heuristica**: `ps -t #{pane_tty} -o stat=,args=`,
+buscando el binario `codex` entre los procesos cuyo estado lleva `+` (el grupo en
+primer plano del terminal, la misma nocion que tmux publica como
+`pane_current_command`). `TmuxService.snapshot` solo paga ese segundo round trip
+cuando el comando es un interprete generico (`node`, `bun`, `deno`, `python`,
+`python3`); `claude.exe`, `zsh` o `vim` ya se explican solos. Si `ps` no lo
+prueba, cae al test textual de `CodexRecogniser.looksLikeCodexFrame`, que exige
+DOS marcas (composer `›` + status bar `modelo · ~` o `modelo · /ruta` como ultima
+linea no vacia) porque cualquiera de las dos sola da falsos positivos.
+
+#### Los DOS bugs que hicieron que esto no funcionara (2026-08-23)
+
+Se escribio el 22 usando `ps -o args= -p #{pane_pid}` y **no funcionaba en
+absoluto**. Dos fallos independientes, y el segundo tapaba al primero:
+
+**1. `#{pane_pid}` NO es el proceso en primer plano, es el shell raiz del pane.**
+Cuando alguien abre un pane y teclea `codex`, el agente es un HIJO de ese shell,
+asi que `ps -p #{pane_pid}` contesta **`-zsh`**. Solo parece correcto si el pane
+se creo con el agente como su comando — que es exactamente como lo montaba el
+primer arnes:
+
+```sh
+tmux new-session -d -s probe "codex"     # pane_pid ES codex  -> el arnes pasaba
+tmux new-session -d -s probe; ...        # pane_pid es zsh, codex es hijo -> real
+```
+
+**Un arnes que no reproduce como se usa la cosa de verdad da confianza falsa.**
+La prueba buena es correr el parser contra los panes que ya hay en la maquina.
+
+El tty lo arregla porque lo comparte todo el grupo de procesos del pane. El
+filtro por `+` importa: Codex deja MCP servers vivos (`safaridriver --mcp`,
+`node_repl`, `codex-code-mode-host`) que heredan el tty y responderian "Codex"
+despues de que Codex haya salido.
+
+**2. El fallback textual exigia una ruta absoluta.** La status bar real de un
+Codex en el home dice `gpt-5.6-terra medium · ~`, no `· /Users/...`. El patron
+pedia `\s·\s/` y no casaba nunca con `~`.
+
+**3. (de diseño) `isCodex` devolvia el veredicto de `ps` en cuanto su salida no
+estaba vacia.** Como `ps` contestaba `-zsh` — no vacio — un pane de Codex real
+quedaba DESCARTADO sin llegar al fallback. Ahora el frame se prueba siempre que
+`ps` no lo haya probado, asi que un fallo del proceso ya no bloquea al texto.
 
 **Diferencias medidas contra un pane real de Codex 0.147.0** (no de memoria):
 
@@ -524,10 +558,15 @@ capturados de un Codex vivo (14 casos: deteccion, falsos positivos con un dev
 server de vite, working/idle/approval, capado del verbo).
 
 `<scratchpad>/bothagents/` — mete el parser REAL por todos los panes tmux de la
-maquina con el `display-message` exacto que manda la app. Es la prueba de
-no-regresion de Claude Code: en la ultima pasada dio
-`claudeCode / working("Infusing") · 21m 53s · ↓66.9k`, `codex / idle`, y `zsh`
-→ no es agente.
+maquina con el `display-message` exacto que manda la app. **Es el arnes que vale**,
+porque usa panes creados como los crea Josu, no como los crearia un test. Pasada
+del 2026-08-23, con un Codex arrancado a mano en un pane:
+
+```
+[NewsRaider] cmd=node  -> agent=codex / working("Working")   summary=Working · 5s
+[RemoteSSH]  cmd=claude.exe -> claudeCode / working("Scampering") · 4m 24s · ↓11.8k
+[sidenotes]  cmd=claude.exe -> claudeCode / working("Grooving") · 2m 9s · ↓6.9k
+```
 
 Dos trampas de `swiftc` sueltas: el fichero del arnes **debe llamarse
 `main.swift`** (si no, *"expressions are not allowed at the top level"*), y con

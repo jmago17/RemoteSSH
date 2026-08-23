@@ -96,12 +96,21 @@ struct PaneSnapshot: Hashable, Sendable {
     /// tmux `#{pane_height}` — rows in the pane, i.e. how much of `text` is
     /// the *screen* rather than scrollback. See `visibleScreen`.
     var paneHeight: Int
-    /// `ps -o args=` for `#{pane_pid}`, e.g. `node /opt/homebrew/bin/codex`.
+    /// Raw `ps -t <pane_tty> -o stat=,args=` output: every process attached to
+    /// the pane's terminal, one per line, each prefixed with its state.
+    ///
+    /// **Why the tty and not `#{pane_pid}`.** `pane_pid` is the *root* process
+    /// of the pane — the shell tmux started. When someone opens a pane and
+    /// types `codex`, the agent is a child, and asking `ps` about the pane pid
+    /// answers `-zsh`. (It only looks right when the pane was created with the
+    /// agent as its command, which is exactly how the first harness built it,
+    /// which is why this shipped broken.) The tty is shared by the whole
+    /// process group, so it finds the child.
     ///
     /// Only fetched when `currentCommand` is a generic interpreter, because
     /// that's the only case where the process name doesn't already say what
     /// the pane is. Empty when it wasn't asked for, or when `ps` said nothing.
-    var processArgs: String
+    var foregroundProcesses: String
 
     init(
         text: String,
@@ -109,14 +118,14 @@ struct PaneSnapshot: Hashable, Sendable {
         currentCommand: String = "",
         paneTitle: String = "",
         paneHeight: Int = 0,
-        processArgs: String = ""
+        foregroundProcesses: String = ""
     ) {
         self.text = text
         self.alternateScreen = alternateScreen
         self.currentCommand = currentCommand
         self.paneTitle = paneTitle
         self.paneHeight = paneHeight
-        self.processArgs = processArgs
+        self.foregroundProcesses = foregroundProcesses
     }
 
     /// Just the part of `text` that is on screen right now.
@@ -243,7 +252,7 @@ enum TranscriptParser {
         // program named `node`.
         if CodexRecogniser.isCodex(
             command: snapshot.currentCommand,
-            processArgs: snapshot.processArgs,
+            foregroundProcesses: snapshot.foregroundProcesses,
             text: snapshot.text
         ) {
             var t = raw(lines, because: .agent(.codex))

@@ -68,7 +68,7 @@ struct TmuxService {
                 if isClaude {
                     preview = ClaudeCodeRecogniser.status(text: screen, paneTitle: title).summary
                 } else if mightBeCodex,
-                          CodexRecogniser.isCodex(command: command, processArgs: "", text: screen) {
+                          CodexRecogniser.isCodex(command: command, foregroundProcesses: "", text: screen) {
                     preview = CodexRecogniser.status(text: screen, paneTitle: title).summary
                 } else {
                     preview = Self.lastNonEmptyLine(pane)
@@ -249,22 +249,30 @@ struct TmuxService {
         // Claude Code puts the current task there and it may contain spaces —
         // and `|` — so the tail is rejoined rather than indexed.
         let info = (try? await shell.run(
-            "\(pathPrefix) tmux display-message -p -t \(quote(name)) '#{alternate_on}|#{pane_current_command}|#{pane_pid}|#{pane_height}|#{pane_title}' 2>/dev/null || true"
+            "\(pathPrefix) tmux display-message -p -t \(quote(name)) '#{alternate_on}|#{pane_current_command}|#{pane_tty}|#{pane_height}|#{pane_title}' 2>/dev/null || true"
         )) ?? ""
 
         let parts = info.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "|", omittingEmptySubsequences: false)
         let command = parts.count > 1 ? String(parts[1]) : ""
-        let pid = parts.count > 2 ? String(parts[2]) : ""
+        let tty = parts.count > 2 ? String(parts[2]) : ""
         let height = parts.count > 3 ? Int(parts[3]) ?? 0 : 0
 
         // A second round trip, but only for panes whose process name explains
         // nothing. Codex reports as a bare `node`, so without this it is
         // indistinguishable from any other node process; `claude.exe`, `zsh`
         // and `vim` need no such help and don't pay for it.
-        var processArgs = ""
-        if CodexRecogniser.isGenericInterpreter(command: command), !pid.isEmpty {
-            processArgs = ((try? await shell.run(
-                "ps -o args= -p \(quote(pid)) 2>/dev/null | head -1 || true"
+        //
+        // Asked by tty, not by pid: `#{pane_pid}` is the shell tmux started,
+        // and an agent the user launched by typing its name is a *child* of
+        // that shell — `ps -p #{pane_pid}` answers `-zsh`. Every process in the
+        // pane shares the tty, so this finds the child. `stat` comes along so
+        // the recogniser can tell the foreground group (`S+`) from leftovers
+        // that merely inherited the terminal.
+        var foreground = ""
+        if CodexRecogniser.isGenericInterpreter(command: command), !tty.isEmpty {
+            let device = tty.hasPrefix("/dev/") ? String(tty.dropFirst(5)) : tty
+            foreground = ((try? await shell.run(
+                "ps -t \(quote(device)) -o stat=,args= 2>/dev/null || true"
             )) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
@@ -274,7 +282,7 @@ struct TmuxService {
             currentCommand: command,
             paneTitle: parts.count > 4 ? parts[4...].joined(separator: "|") : "",
             paneHeight: height,
-            processArgs: processArgs
+            foregroundProcesses: foreground
         )
     }
 
