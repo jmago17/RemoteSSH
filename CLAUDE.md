@@ -700,6 +700,25 @@ for f in "$P"/*.mobileprovision; do
 done
 ```
 
+### DESBLOQUEADO: el build 11 llego a TestFlight (2026-08-23)
+
+Tras restaurar el app record y subir `MARKETING_VERSION` a 1.0, Xcode Cloud
+**vuelve a entregar**: el build **11** paso validacion y se instalo desde
+TestFlight en el iPad. Se acabo el "Preparing build for App Store Connect
+failed".
+
+Cual de las dos cosas lo arreglo no se sabe por separado — se hicieron a la vez.
+
+**Como saber que lleva un build sin mirar numeros** (util porque los arreglos
+internos no se ven): en la lista de sesiones, el boton `⋯` **desaparecio** el
+2026-08-22 y en su sitio hay un **engranaje** junto al `+`. Y en la pantalla de
+una sesion hay un `⋯` junto a *Terminal* (el de Kill Session). Si se ve el `⋯`
+en la LISTA, el build es anterior a `800e1f8`.
+
+El build 11 lleva hasta `e18f11b` incluido, pero **NO** el arreglo del
+reconocedor de Codex (`5c09bd5`), que es posterior. De ahi que Codex siguiera
+saliendo como `node` en el iPad con el 11 instalado.
+
 ### Borrar el app record fue un error: hay que RESTAURARLO, no recrearlo
 
 Una vez se ha subido un build a un bundle id, **ese bundle id no se puede
