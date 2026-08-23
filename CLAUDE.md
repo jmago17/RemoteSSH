@@ -621,26 +621,36 @@ grep -rioE "mac[a-z]*" "$APP/Metadata.appintents/"     # debe salir vacio
 grep -oE "Sends a command[^\"]*" "$APP/Metadata.appintents/extract.actionsdata"
 ```
 
-### "Preparing build for App Store Connect failed" tras renombrar el bundle id
+### App Store Connect tras el rename: lo que pasó de verdad
 
-Sintoma: Xcode Cloud **compila y archiva bien**, y muere en el ultimo paso con
-ese texto y **ningun detalle mas** en el log.
+**CORRECCION (2026-08-23).** La primera version de esta seccion decia que el app
+record estaba atado a `com.danobat.RemoteSSH` y que no existia ninguno para el
+bundle nuevo. **Es falso.** Al intentar recrearlo, Apple contesto:
 
-**Un App ID NO es un app record.** Son dos cosas en dos sitios:
+```
+App record with bundle identifier "com.maromeapps.RemoteSSH" was previously
+removed from App Store Connect for team "Josu Martinez Gonzalez".
+Go to App Store Connect to restore the app.
+```
 
-- **App ID** (developer.apple.com, Certificates/Identifiers): lo crea Xcode solo
-  al firmar. El de `com.maromeapps.RemoteSSH` **existe** — se creo el 2026-08-22
-  a las 04:29Z, al hacer el rename — y tiene las mismas capabilities que el
-  viejo, iCloud incluido.
-- **App record** (App Store Connect): hay que crearlo a mano. El que existe
-  (App Apple ID **6804001421**) esta atado a **`com.danobat.RemoteSSH`**, y
-  **Apple no deja cambiarle el bundle id** una vez creado.
+O sea que el record **si existia con el bundle NUEVO**, y era el unico de la
+cuenta. Reconstruccion correcta: el rename se pusheo por la mañana, Xcode Cloud
+creo el record con `com.maromeapps.RemoteSSH`, y el **build 10** salio de ahi —
+por eso llevaba todavia la descripcion vieja del App Intent y lo tumbo
+ITMS-90626. No era un build del bundle antiguo, como se dedujo entonces.
 
-Por eso el build 10 (bundle viejo) llego a validarse — y fue rechazado por
-ITMS-90626 — mientras que los de despues del rename mueren en el paso que los
-sube: no hay app a la que subirlos.
+**Queda sin confirmar** por que fallaba "Preparing build for App Store Connect".
+Con el record existente, la hipotesis viva es la que se descarto demasiado
+pronto: el binario se presentaba como `0.1.0` mientras el record hablaba de
+`1.0`. Por eso se subio `MARKETING_VERSION` a 1.0 — si tras restaurar el record
+el build entra, era eso.
 
-**Como se descarto lo demas, con datos y no por eliminacion a ojo:**
+**Un App ID NO es un app record** (esto si sigue siendo cierto y vale la pena
+recordarlo). Son dos cosas en dos sitios: el **App ID** de
+developer.apple.com lo crea Xcode solo al firmar — el de
+`com.maromeapps.RemoteSSH` existe desde el 2026-08-22 04:29Z, con iCloud
+incluido — mientras que el **app record** de App Store Connect es otra entidad.
+Comprobar las capabilities de un App ID sin entrar al portal:
 
 ```sh
 P=~/Library/Developer/Xcode/UserData/Provisioning\ Profiles
@@ -648,21 +658,27 @@ for f in "$P"/*.mobileprovision; do
   D=$(security cms -D -i "$f")
   echo "$D" | plutil -extract Entitlements.application-identifier raw -
   echo "$D" | plutil -extract Entitlements xml1 -o - - | grep ubiquity
-  echo "$D" | plutil -extract CreationDate raw -
 done
 ```
 
-→ el App ID nuevo existe y lleva `ubiquity-kvstore-identifier`, asi que ni
-faltaba el identifier ni le faltaba la capability de iCloud.
+### Borrar el app record fue un error: hay que RESTAURARLO, no recrearlo
 
-**Arreglo (solo desde App Store Connect, no por commit)**: crear un app record
-nuevo con bundle id `com.maromeapps.RemoteSSH` (Apps → + → New App; el bundle id
-ya sale en el desplegable porque el App ID existe).
+Una vez se ha subido un build a un bundle id, **ese bundle id no se puede
+reutilizar** para una app nueva. Con el build 10 ya subido a
+`com.maromeapps.RemoteSSH`, crear otro record con ese id **no es una salida**:
+la unica via es restaurar el eliminado.
 
-**Trampa al crearlo**: Apple no admite dos apps con el mismo nombre en la misma
-cuenta, y el record viejo tiene "RemoteSSH" cogido. O se le pone otro nombre, o
-primero se borra el viejo (App Information → Delete App), que solo se puede si
-nunca se publico.
+Ruta exacta (doc de Apple, "Remove an app"):
+
+> Apps → la flecha junto a **All Statuses** (arriba a la derecha) → **Removed
+> Apps** → elegir la app → **App Information** en la barra lateral →
+> **Additional Information** → **Restore App** → Full Access → Restore.
+
+- Hace falta rol **Account Holder o Admin**.
+- Si la eliminada es la unica app de la cuenta, sale directamente en Apps sin
+  filtrar.
+- **No se puede restaurar si el nombre ya lo ha cogido otra cuenta.** Es el
+  unico impedimento real, y es una carrera contra terceros: cuanto antes.
 
 **Versiones**: `MARKETING_VERSION` pasa a **1.0** el 2026-08-22 (era `0.1.0`),
 para que coincida con la version que se le pone al app record nuevo. Verificado
