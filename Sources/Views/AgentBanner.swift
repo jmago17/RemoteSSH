@@ -70,6 +70,10 @@ struct AgentBanner: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 13))
                 .foregroundStyle(accent)
+        case .failed:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(accent)
         }
     }
 
@@ -79,6 +83,7 @@ struct AgentBanner: View {
         case .working(let verb): return "\(name) · \(verb)"
         case .awaitingApproval: return "\(name) is waiting for you"
         case .idle: return "\(name) · idle"
+        case .failed: return "\(name) stopped on an error"
         }
     }
 
@@ -96,6 +101,7 @@ struct AgentBanner: View {
         case .working: return Theme.link
         case .awaitingApproval: return Theme.warn
         case .idle: return Theme.live
+        case .failed: return Theme.warn
         }
     }
 }

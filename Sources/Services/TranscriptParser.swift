@@ -111,6 +111,10 @@ struct PaneSnapshot: Hashable, Sendable {
     /// that's the only case where the process name doesn't already say what
     /// the pane is. Empty when it wasn't asked for, or when `ps` said nothing.
     var foregroundProcesses: String
+    /// What the agent's own lifecycle hooks last published for this pane, when
+    /// there is anything. The authority on state when present — see
+    /// `AgentState`.
+    var agentState: AgentState?
 
     init(
         text: String,
@@ -118,7 +122,8 @@ struct PaneSnapshot: Hashable, Sendable {
         currentCommand: String = "",
         paneTitle: String = "",
         paneHeight: Int = 0,
-        foregroundProcesses: String = ""
+        foregroundProcesses: String = "",
+        agentState: AgentState? = nil
     ) {
         self.text = text
         self.alternateScreen = alternateScreen
@@ -126,6 +131,7 @@ struct PaneSnapshot: Hashable, Sendable {
         self.paneTitle = paneTitle
         self.paneHeight = paneHeight
         self.foregroundProcesses = foregroundProcesses
+        self.agentState = agentState
     }
 
     /// Just the part of `text` that is on screen right now.
@@ -234,6 +240,16 @@ enum TranscriptParser {
         // first and attach a status summary. The body still goes through as a
         // raw frame: Claude hard-wraps to the pane width, so reflowing it into
         // bubbles would corrupt paths and commands (`Pl` + `atforms`).
+        // A hook record outranks anything read off the screen: it is the
+        // process saying what it is doing, rather than the app inferring it
+        // from how the process happens to draw itself this week. The screen is
+        // still read afterwards, but only to *decorate* — see `enrich`.
+        if let state = snapshot.agentState, !state.isStale(command: snapshot.currentCommand) {
+            var t = raw(lines, because: .agent(state.kind))
+            t.agent = enrich(state.status(), fromScreen: snapshot)
+            return t
+        }
+
         if ClaudeCodeRecogniser.isClaudeCode(command: snapshot.currentCommand) {
             var t = raw(lines, because: .agent(.claudeCode))
             t.agent = ClaudeCodeRecogniser.status(
@@ -285,6 +301,34 @@ enum TranscriptParser {
         }
 
         return Transcript(turns: buildTurns(lines, promptIndices: promptIndices, signature: signature), fallback: nil)
+    }
+
+    /// Borrows the cosmetic details the screen has and the hooks don't.
+    ///
+    /// A hook knows *that* a turn is running; the pane knows Claude Code is
+    /// currently calling it "Hullaballooing", how long it says it has been at
+    /// it, and how many tokens it has read. Those are worth showing, but only
+    /// when the screen agrees with the hook about the state — if they disagree,
+    /// the hook wins outright and the screen's guess is discarded rather than
+    /// blended into a banner that is half one thing and half another.
+    private static func enrich(_ status: AgentStatus, fromScreen snapshot: PaneSnapshot) -> AgentStatus {
+        guard case .working = status.activity else { return status }
+        let screen: AgentStatus
+        switch status.agent {
+        case .claudeCode:
+            screen = ClaudeCodeRecogniser.status(text: snapshot.visibleScreen, paneTitle: snapshot.paneTitle)
+        case .codex:
+            screen = CodexRecogniser.status(text: snapshot.visibleScreen, paneTitle: snapshot.paneTitle)
+        }
+        guard case .working = screen.activity else { return status }
+
+        var enriched = status
+        enriched.activity = screen.activity      // the real verb
+        enriched.elapsed = screen.elapsed ?? status.elapsed
+        enriched.tokens = screen.tokens
+        enriched.detail = screen.detail
+        if enriched.task == nil { enriched.task = screen.task }
+        return enriched
     }
 
     /// Convenience for plain text with nothing known about the pane.

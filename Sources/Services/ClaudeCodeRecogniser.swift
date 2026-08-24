@@ -47,12 +47,27 @@ struct AgentStatus: Hashable, Sendable {
         case awaitingApproval
         /// No spinner, no question: the composer is sitting there.
         case idle
+        /// The turn ended on an API error. Only ever reported by the hooks —
+        /// the screen can't tell this apart from an ordinary idle pane, which
+        /// is precisely why waiting on a notification that never came used to
+        /// be the failure mode.
+        case failed
+    }
+
+    /// Where this reading came from. Kept so a wrong banner can be traced to
+    /// the right place while both paths coexist.
+    enum Source: Hashable, Sendable {
+        /// The agent's own lifecycle hooks, via a state file on the Mac.
+        case hook
+        /// Inferred by reading the terminal. The fallback.
+        case screen
     }
 
     /// Which agent this describes. Defaults to Claude Code so the existing
     /// call sites keep reading the way they did.
     var agent: AgentKind = .claudeCode
     var activity: Activity
+    var source: Source = .screen
     /// The current task, when the agent publishes one in the pane title.
     /// Claude Code does; Codex puts its working directory there instead, which
     /// is not a task, so its recogniser leaves this `nil` rather than dress a
@@ -64,12 +79,20 @@ struct AgentStatus: Hashable, Sendable {
     var tokens: String?
     /// The trailing detail some spinners carry, e.g. `thinking`.
     var detail: String?
+    /// The turn's closing text, when it came from a hook.
+    ///
+    /// Only ever set on `.hook` readings, and that's the point: the screen path
+    /// has to reconstruct this by scraping the pane and undoing Claude Code's
+    /// own hard-wrapping, while the hook payload hands it over intact.
+    var lastMessage: String?
 
     /// One line for a session row, built from whatever was available.
     var summary: String {
         switch activity {
         case .awaitingApproval:
             return "Waiting for your answer"
+        case .failed:
+            return "Stopped on an API error"
         case .idle:
             return task ?? agent.displayName
         case .working(let verb):

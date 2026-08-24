@@ -179,11 +179,13 @@ final class ChatSessionModel {
     /// summarised *this text* already", which is true whether the user saw
     /// the transition, missed it, or the app was relaunched entirely.
     private func summariseIfNewConclusion(_ status: AgentStatus?) {
-        // Claude Code only. `lastConclusion` finds the last turn by Claude
-        // Code's `⏺` marker; Codex uses `•`, so on a Codex pane this would
-        // summarise whatever the tail of the frame happened to be and present
-        // it as a conclusion. No verified Codex extractor yet, so no card.
-        guard status?.agent == .claudeCode else { return }
+        // Screen-read conclusions stay Claude-Code-only: `lastConclusion`
+        // finds the last turn by Claude Code's `⏺` marker, and Codex marks
+        // with `•`, so on a Codex pane it would summarise whatever the tail of
+        // the frame happened to be. A hook reading has no such problem — the
+        // text arrives verbatim from the agent — so Codex gets a card too as
+        // soon as the state comes from there.
+        guard status?.agent == .claudeCode || status?.source == .hook else { return }
         let activity = status?.activity
         guard case .idle = activity else {
             // A fresh command invalidates whatever the last summary was about.
@@ -193,8 +195,13 @@ final class ChatSessionModel {
             }
             return
         }
+        // Prefer the hook's own text. Scraping the pane means undoing the
+        // wrapping Claude Code applied and then guessing which lines were
+        // tool-call noise; the hook payload is the message itself.
+        let hookText = status?.lastMessage.flatMap { $0.isEmpty ? nil : $0 }
         guard !isSummarising,
-              let conclusion = ClaudeCodeRecogniser.lastConclusion(text: transcript.turns.first?.text ?? "")
+              let conclusion = hookText
+                ?? ClaudeCodeRecogniser.lastConclusion(text: transcript.turns.first?.text ?? "")
         else { return }
 
         let digest = Self.digest(of: conclusion)

@@ -26,6 +26,10 @@ struct TmuxService {
                 "\(Self.pathPrefix) tmux list-sessions -F '\(Self.listFormat)' 2>/dev/null || true"
             )
 
+            // Read once for every session. Records whose pane no longer runs
+            // an agent are dropped below — a hook can't publish "I was killed".
+            let states = AgentState.parse((try? await shell.run(Self.readAgentStateCommand)) ?? "")
+
             var sessions: [TmuxSession] = []
             for line in raw.split(separator: "\n", omittingEmptySubsequences: true) {
                 let parts = line.split(separator: "|", omittingEmptySubsequences: false)
@@ -64,8 +68,19 @@ struct TmuxService {
                 let snapshot = PaneSnapshot(text: pane, currentCommand: command, paneTitle: title, paneHeight: height)
                 let screen = snapshot.visibleScreen
 
+                // The hooks are the better source when they have something
+                // to say: a real signal from the process beats inference about
+                // its output. Falls through to reading the screen when there
+                // is no record, which covers agents started before the hooks
+                // were installed and anything running on another machine.
+                let hookState = states
+                    .filter { $0.session == name && !$0.isStale(command: command) }
+                    .max(by: { $0.updated < $1.updated })
+
                 let preview: String
-                if isClaude {
+                if let hookState {
+                    preview = hookState.status().summary
+                } else if isClaude {
                     preview = ClaudeCodeRecogniser.status(text: screen, paneTitle: title).summary
                 } else if mightBeCodex,
                           CodexRecogniser.isCodex(command: command, foregroundProcesses: "", text: screen) {
@@ -239,6 +254,15 @@ struct TmuxService {
     /// command or a long output line arrives pre-split, and the continuations
     /// look like new lines to the parser — which is exactly how an output ends
     /// up attributed to the wrong command.
+    /// Everything the lifecycle hooks have published, as JSONL — one record
+    /// per pane. One command for every session, rather than one per session:
+    /// the whole point of this path is that it costs almost nothing.
+    ///
+    /// `|| true` because the glob matches nothing when no agent has ever run,
+    /// and "no state" is an answer, not a failure.
+    static let readAgentStateCommand =
+        #"cat "$HOME"/.remotessh/state/*.json 2>/dev/null || true"#
+
     static func captureCommand(session name: String, lines: Int) -> String {
         "\(pathPrefix) tmux capture-pane -p -J -t \(quote(name)) -S -\(lines) 2>/dev/null || true"
     }
@@ -249,13 +273,14 @@ struct TmuxService {
         // Claude Code puts the current task there and it may contain spaces —
         // and `|` — so the tail is rejoined rather than indexed.
         let info = (try? await shell.run(
-            "\(pathPrefix) tmux display-message -p -t \(quote(name)) '#{alternate_on}|#{pane_current_command}|#{pane_tty}|#{pane_height}|#{pane_title}' 2>/dev/null || true"
+            "\(pathPrefix) tmux display-message -p -t \(quote(name)) '#{alternate_on}|#{pane_current_command}|#{pane_tty}|#{pane_height}|#{pane_id}|#{pane_title}' 2>/dev/null || true"
         )) ?? ""
 
         let parts = info.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "|", omittingEmptySubsequences: false)
         let command = parts.count > 1 ? String(parts[1]) : ""
         let tty = parts.count > 2 ? String(parts[2]) : ""
         let height = parts.count > 3 ? Int(parts[3]) ?? 0 : 0
+        let pane = parts.count > 4 ? String(parts[4]) : ""
 
         // A second round trip, but only for panes whose process name explains
         // nothing. Codex reports as a bare `node`, so without this it is
@@ -276,13 +301,21 @@ struct TmuxService {
             )) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
+        // Same records, filtered to this pane. Cheap enough to fetch on every
+        // chat refresh: it's one `cat` on a connection that is already open.
+        let states = AgentState.parse((try? await shell.run(readAgentStateCommand)) ?? "")
+        let paneState = states
+            .filter { $0.pane == pane || $0.session == name }
+            .max(by: { $0.updated < $1.updated })
+
         return PaneSnapshot(
             text: text,
             alternateScreen: parts.first.map { $0 == "1" } ?? false,
             currentCommand: command,
-            paneTitle: parts.count > 4 ? parts[4...].joined(separator: "|") : "",
+            paneTitle: parts.count > 5 ? parts[5...].joined(separator: "|") : "",
             paneHeight: height,
-            foregroundProcesses: foreground
+            foregroundProcesses: foreground,
+            agentState: paneState
         )
     }
 

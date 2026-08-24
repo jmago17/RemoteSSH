@@ -915,3 +915,113 @@ Dos avisos al configurarlo:
   mas.
 - **Auto-cancel Builds**: con disparo por rama, varios pushes seguidos encolan
   builds; con auto-cancel el nuevo cancela al anterior.
+
+## Sesion 2026-08-24 (2): el estado deja de leerse de la pantalla
+
+Hasta ahora el estado de un agente se **deducia de su salida**: buscar un
+spinner `…(Nm Ns` para "trabajando", perderlo para "parado". Funciona hasta que
+el agente cambia como se dibuja — y Claude Code **rota el glifo y el verbo**
+(`✽`/`·`/`✻`/`✢`, "Beaming", "Hullaballooing"), asi que lo unico anclable era la
+forma del cronometro entre parentesis. Es inferencia sobre un dibujo, no una
+señal del proceso.
+
+Ahora los **hooks de ciclo de vida** publican el estado real. Idea tomada de
+Superset (superset.sh), que resuelve lo mismo asi.
+
+### Lo que YA existia (no se partia de cero)
+
+`~/.claude/hooks/remotessh-notify.sh` ya servia a Claude Code y a Codex desde el
+2026-08-21: sacaba la sesion tmux de `$TMUX_PANE` y empujaba a Brrr. La pieza de
+identidad que Superset resuelve con una env var propia (`SUPERSET_TERMINAL_ID`)
+aqui ya salia gratis de `$TMUX_PANE`, sin necesidad del wrapper de comando en el
+PATH que ellos instalan.
+
+### La decision de arquitectura: DOS canales, no uno
+
+| | Pregunta | Vida | Transporte |
+|---|---|---|---|
+| **Estado** | "¿que hace ahora?" | perdura, se consulta | **fichero en el Mac, leido por SSH** |
+| **Aviso** | "acaba de terminar" | efimero, se empuja | push (Brrr) — ya existia |
+
+**Cloudflare no pinta nada aqui**, aunque fuera la primera idea. Un Worker
+añadiria un intermediario que autenticar, un secreto que rotar y un punto de
+fallo, para transportar un dato que ya viaja por un canal autenticado y abierto:
+la propia conexion SSH de la app. El Mac sigue sin exponerse a internet.
+
+### Que escribe el hook
+
+`~/.remotessh/state/<pane>.json`, **uno por PANE** (no por sesion: dos agentes
+en dos panes de la misma sesion se pisarian). Escritura **atomica** (tmp + `mv`
+en el mismo filesystem) para que la app no pueda leer medio registro.
+
+```json
+{"v":1,"pane":"%12","session":"NewsRaider","agent":"claude-code",
+ "state":"working","since":1756070000,"updated":1756070042,
+ "session_id":"abc-123","last_message":null,"question":null}
+```
+
+Eventos registrados en `~/.claude/settings.json` (merge, respetando lo que
+hubiera): `SessionStart`, `UserPromptSubmit`, `Stop`, **`StopFailure`**,
+`Notification`, `SessionEnd`.
+
+**`StopFailure` es el que faltaba y no es cosmetico**: es el hook de error de
+API y *la sesion sigue viva*, asi que sin el un turno fallido dejaba el estado
+clavado en "working" esperando un `Stop` que no iba a llegar.
+
+### Las tres guardas, que son lo que hace esto correcto
+
+1. **Subagentes.** `agent_id` solo aparece cuando el hook se dispara DENTRO de
+   un subagente (Task tool). Sin filtrarlo, cada subagente que acaba dispara
+   `Stop` y marca la sesion como parada mientras el hilo principal sigue.
+   **Esto era un bug real del script desde el 21**: avisaba "ha terminado" a
+   mitad de trabajo.
+2. **Nunca asumir `Stop`.** Si el payload no se puede parsear o el evento no se
+   reconoce, el script **no toca el estado**. Un estado perdido se corrige en el
+   siguiente evento; un "ha terminado" falso te manda al Mac para nada.
+3. **Estado escrito ANTES de las guardas de notificacion.** "Ya lo estas
+   mirando" y "el turno duro menos de 60s" son razones para no INTERRUMPIRTE,
+   no para dejar que la app muestre un estado viejo.
+
+### Estado obsoleto, sin boton manual
+
+Un hook no puede publicar "me han matado": un `kill -9` no dispara nada. Superset
+lo resuelve con un boton "Clear Status". Aqui no hace falta: la app **ya pregunta
+a tmux que corre en el pane**, asi que si el registro dice `working` pero el pane
+volvio a ser un shell, el registro es mentira y se descarta. Ademas caduca a las
+24h y se rechaza cualquier `v` distinto de 1.
+
+### Quien manda cuando ambos hablan
+
+El hook decide **el estado**; la pantalla aporta **el adorno** (el verbo real que
+Claude Code esta usando ahora, los tokens) y solo **si coincide** con el hook. Si
+discrepan, gana el hook y lo de la pantalla se descarta entero — nunca un banner
+mitad de una fuente y mitad de otra. `AgentStatus.source` (`.hook` / `.screen`)
+deja rastrear de donde salio cada lectura.
+
+**El parser de pantalla NO se borra**: es el fallback para agentes lanzados antes
+de instalar los hooks, o en otra maquina. La app nunca queda peor que antes.
+
+### Lo que gana el resumen de Apple Intelligence
+
+`lastConclusion` reconstruia el texto raspando el pane y deshaciendo el
+hard-wrap de Claude Code — el trozo mas fragil de todo el pipeline. El payload
+de `Stop` trae `last_assistant_message` **intacto**. Ademas, como ese texto no
+depende del marcador `⏺`, **Codex tambien puede tener tarjeta de conclusion**
+cuando el estado viene del hook.
+
+### Arneses
+
+- `<scratchpad>/hooktest.sh` — dispara el hook REAL con payloads de cada evento
+  y comprueba el fichero resultante, incluidas las tres guardas.
+- `<scratchpad>/hookstate/` — mete el `TranscriptParser` REAL por 9 casos:
+  hook+pantalla de acuerdo, hook `idle` ganando a una pantalla que aun muestra
+  spinner, `error` → `failed`, registro obsoleto por pane y por antiguedad,
+  ausencia de registro (no regresion), version futura, y JSONL corrupto.
+
+**Trampa de las pruebas**: `echo '...\n...'` en zsh convierte `\n` en salto real
+y deja el JSON invalido. Al depurar el hook, parecia que `Stop` no escribia
+estado; en realidad el script hacia lo correcto (no reconocer el evento → no
+tocar nada). Usar `printf '%s'`.
+
+**Sin probar en dispositivo**: todo esto compila y pasa arneses contra panes
+reales, pero no se ha visto en el iPhone.
