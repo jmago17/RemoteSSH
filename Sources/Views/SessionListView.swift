@@ -24,6 +24,7 @@ struct SessionListView: View {
     @State private var showingNewSession = false
     @State private var newSessionName = ""
     @State private var columnVisibility = NavigationSplitViewVisibility.all
+    @Environment(\.scenePhase) private var scenePhase
 
     private var isRegular: Bool { horizontalSizeClass.isRegular }
 
@@ -91,6 +92,34 @@ struct SessionListView: View {
             model.pendingOpenSession = nil
         }
         .onDisappear { model.stopPolling() }
+        // **This is what stopped the app coming back from the background.**
+        //
+        // `onDisappear` doesn't fire when the app is merely backgrounded — the
+        // view is still "on screen" as far as SwiftUI is concerned — so the
+        // poller stayed alive and iOS suspended the process holding an open
+        // SSH socket. On return that socket is dead, but the `await` inside
+        // the poll loop never learns that and simply never resumes: the task
+        // is still non-nil so `startPolling` does nothing, `isRefreshing` is
+        // still true, and the only way out is force-quitting the app.
+        //
+        // Tearing the poller down on the way out and building a fresh one on
+        // the way back in fixes it whether or not the stuck task ever notices
+        // it was cancelled — the new one doesn't share its socket.
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active:
+                model.startPolling()
+            case .background:
+                model.stopPolling()
+            case .inactive:
+                // Transient — the app switcher, a call coming in. The process
+                // isn't suspended here, so there's nothing to tear down, and
+                // stopping would also fire during the launch transition.
+                break
+            @unknown default:
+                break
+            }
+        }
     }
 
     // MARK: Containers

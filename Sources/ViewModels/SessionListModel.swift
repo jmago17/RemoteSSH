@@ -182,6 +182,10 @@ final class SessionListModel {
     func stopPolling() {
         pollTask?.cancel()
         pollTask = nil
+        // A refresh interrupted mid-flight never runs its own `defer`, so this
+        // flag would stay true and leave the UI spinning for good. See
+        // `SessionListView`'s scenePhase handling for when that happens.
+        isRefreshing = false
     }
 
     // MARK: Refresh
@@ -199,6 +203,20 @@ final class SessionListModel {
 
         isRefreshing = true
         defer { isRefreshing = false }
+
+        // Ask whether anything is listening before trying to talk to it. A
+        // sleeping Mac now costs ~1.5s instead of the SSH connect timeout, and
+        // the two failures stop looking alike: "nothing is there" is a
+        // different problem, with a different fix, from "SSH turned us away".
+        //
+        // The session list is deliberately left alone rather than cleared —
+        // the Mac going to sleep doesn't mean those sessions are gone, and
+        // blanking the screen every time the laptop lid shuts would lose the
+        // last thing the user was looking at.
+        guard await HostReachability.canReach(host: config.host, port: config.port) else {
+            errorMessage = "\(config.host) isn't answering on port \(config.port). It's probably asleep or off."
+            return
+        }
 
         do {
             let fetched = try await tmux.fetchSessions(config: config, credential: credential)

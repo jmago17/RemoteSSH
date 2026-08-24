@@ -1,5 +1,6 @@
 import Foundation
 import Citadel
+import NIOCore
 import NIOSSH
 import Crypto
 
@@ -9,13 +10,23 @@ import Crypto
 /// Every function here is nonisolated; the non-Sendable `SSHClient` it returns
 /// must stay within a single nonisolated async scope.
 enum SSHConnector {
+    /// How long to wait for the TCP handshake.
+    ///
+    /// Citadel's own default is **30 seconds**, and not passing this is why
+    /// opening the app against a sleeping Mac sat there for half a minute
+    /// before admitting anything was wrong. On a LAN or over Tailscale a Mac
+    /// that is actually awake answers in milliseconds; four seconds is
+    /// generous for a slow link and still fast enough to feel like an answer.
+    static let connectTimeout: TimeAmount = .seconds(4)
+
     static func connect(config: SSHConnectionConfig, credential: SSHCredential) async throws -> SSHClient {
         try await SSHClient.connect(
             host: config.host,
             port: config.port,
             authenticationMethod: try authenticationMethod(config: config, credential: credential),
             hostKeyValidator: .custom(TOFUHostKeyValidator(host: config.host, port: config.port)),
-            reconnect: .never
+            reconnect: .never,
+            connectTimeout: connectTimeout
         )
     }
 

@@ -797,3 +797,75 @@ Verificado donde importa — el binario, no el yml:
 ```sh
 /usr/libexec/PlistBuddy -c "Print :ITSAppUsesNonExemptEncryption" <app>/Info.plist   # false
 ```
+
+## Sesion 2026-08-24: arranque lento y la app que no volvia del background
+
+Dos sintomas, **una raiz**: nada de lo que toca la red tenia limite de tiempo, y
+nada se cancelaba al pasar a segundo plano.
+
+### 1. Tardaba 30s en decir que el Mac esta apagado
+
+**No era que faltase un timeout: es que no le pasabamos el nuestro.**
+`SSHClient.connect` de Citadel acepta `connectTimeout` y su default es
+**30 segundos** (verificado en el checkout, no de memoria):
+
+```swift
+// Citadel/Sources/Citadel/Client.swift:288
+connectTimeout: TimeAmount = .seconds(30)
+```
+
+Dos cambios:
+
+- `SSHConnector.connectTimeout = .seconds(4)`, explicito. Un Mac despierto
+  contesta en milisegundos por LAN o Tailscale; 4s es generoso.
+- **Sondeo previo** en `HostReachability`, antes de intentar SSH siquiera.
+
+**Por que NO un ping ICMP** (fue la primera idea): en iOS un ping necesita un
+raw socket, que no se concede sin un entitlement especial. El equivalente
+practico es un **connect TCP al puerto 22 con `NWConnection`** — nativo, sin
+permisos, y ademas prueba lo que de verdad importa (que el puerto SSH conteste),
+no que una maquina responda a un echo.
+
+Bonus: separa dos fallos que antes se veian igual — *el Mac duerme* (no hay
+nadie) vs *el Mac esta vivo pero SSH nos rechaza* (credencial, host key, tmux).
+
+**Medido** con `<scratchpad>/reach/`, que compila el `HostReachability.swift`
+REAL:
+
+| caso | resultado |
+|---|---|
+| `127.0.0.1:22` con sshd escuchando | reachable en **6 ms** |
+| `127.0.0.1:9` sin nada escuchando | no reachable en **0 ms** |
+| `192.0.2.1:22` (TEST-NET, no enrutable — un Mac dormido se ve asi) | no reachable en **1587 ms** |
+| host que no resuelve | no reachable en **49 ms** |
+
+**Decision de producto de Josu (2026-08-24)**: cuando el sondeo falla, la app
+**ofrece** despertar el Mac, no lo hace sola. Despertarlo en cada apertura seria
+intrusivo: abrir la app para mirar no deberia encender el Mac.
+
+La lista de sesiones **no se vacia** cuando el sondeo falla. Que el Mac se
+duerma no significa que las sesiones hayan desaparecido, y borrar la pantalla
+cada vez que se cierra la tapa pierde lo ultimo que estabas mirando.
+
+### 2. Al volver de otra app, nunca volvia: habia que forzar el cierre
+
+`startPolling()` estaba en `.onAppear` y `stopPolling()` en `.onDisappear`, y
+**`onDisappear` NO se dispara al pasar a segundo plano** — para SwiftUI la vista
+sigue en pantalla. Secuencia del cuelgue:
+
+1. La app pasa a background con un `refresh()` esperando un socket SSH.
+2. iOS suspende el proceso con el socket abierto.
+3. Al volver, el socket esta muerto, pero el `await` dentro del bucle **no se
+   entera nunca** y no reanuda.
+4. `pollTask` sigue != nil → `startPolling()` no hace nada.
+5. `isRefreshing` se quedo en `true` y su `defer` no llega a correr → la UI gira
+   para siempre.
+
+Arreglo: `.onChange(of: scenePhase)` en `SessionListView` — `.background` para
+el poller, `.active` lo arranca de nuevo. Funciona **aunque la tarea colgada no
+llegue a enterarse de que la cancelaron**, porque la nueva no comparte su socket.
+`stopPolling()` ademas baja `isRefreshing`, que es lo que dejaba la rueda dando
+vueltas.
+
+`.inactive` se ignora a proposito: es transitorio (app switcher, una llamada), no
+suspende el proceso, y ademas se dispara durante el arranque.
