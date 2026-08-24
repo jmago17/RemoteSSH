@@ -869,3 +869,49 @@ vueltas.
 
 `.inactive` se ignora a proposito: es transitorio (app switcher, una llamada), no
 suspende el proceso, y ademas se dispara durante el arranque.
+
+### Xcode Cloud no disparaba solo: el workflow solo tenia "Manual"
+
+Del 2026-08-22 al 24, **ningun push disparo un build**. Habia que lanzarlos a
+mano desde App Store Connect. La causa: el workflow **"Internal TestFlight
+Build"** tenia como unica start condition **Manual**. No estaba roto nada, es que
+nunca se le dijo que escuchara la rama.
+
+**Como se diagnostico sin acceso a App Store Connect**, por si vuelve a pasar.
+Xcode Cloud publica un check run en cada commit que compila, y eso SI se ve
+desde el repo:
+
+```sh
+for SHA in $(git log --format=%H -8 origin/main); do
+  gh api "repos/jmago17/RemoteSSH/commits/$SHA/check-runs" \
+    --jq '.check_runs[] | "\(.app.slug):\(.name):\(.conclusion // .status)"'
+done
+```
+
+Lo que se saca de ahi:
+
+- Si aparece `xcode-cloud:...`, la **GitHub App esta instalada y con acceso** —
+  la conexion no es el problema. Si no apareciera en ningun commit, habria que
+  mirar la instalacion de la app.
+- `gh api repos/jmago17/RemoteSSH/hooks` sale **vacio y es normal**: Xcode Cloud
+  usa la GitHub App, no un webhook clasico. Un `/hooks` vacio NO prueba nada.
+- **Un check run NO distingue un build automatico de uno manual.** Aqui se
+  interpretaron tres checks sueltos como "el disparo automatico funciona a
+  veces", y eran los tres builds que Josu habia lanzado a mano. La pista real
+  era que no correlacionaban ni con los ficheros tocados (un commit de solo
+  `CLAUDE.md` disparo; uno de `Sources/` no) ni con el tiempo.
+- `gh api /user/installations` **no sirve** con el token normal de `gh`: da 403,
+  hace falta un token autorizado para una GitHub App.
+
+**Arreglo (solo en App Store Connect)**: Workflow → Edit Workflow → Start
+Conditions → `+` → **Branch Changes** → Source Branch `main`.
+
+Dos avisos al configurarlo:
+
+- **Files and Folders**: sin filtro, cada push consume un build, y en este repo
+  hay muchos commits de solo documentacion. El filtro util seria `Sources/`,
+  `project.yml`, `ci_scripts/`, `swiftpm/` — pero mal puesto devuelve el
+  sintoma "no dispara nunca", que es mas caro de diagnosticar que unos builds de
+  mas.
+- **Auto-cancel Builds**: con disparo por rama, varios pushes seguidos encolan
+  builds; con auto-cancel el nuevo cancela al anterior.
