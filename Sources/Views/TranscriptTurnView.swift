@@ -279,6 +279,22 @@ struct TranscriptTurnView: View {
     ///
     /// Falls back to the content when tmux didn't say (an older snapshot, a
     /// transcript built from plain text).
+    /// How many columns this screen can show at a size that is still readable.
+    ///
+    /// Deliberately not the *smallest* readable size: asking tmux for 77
+    /// columns because they technically fit at the 7.5pt floor would trade the
+    /// scroll bar for a squint. `readableFontSize` is the size the transcript
+    /// wants to render at, so this is the width that gets it.
+    static func columnsThatFit(width: CGFloat) -> Int {
+        let usable = width - blockPadding
+        guard usable > 0 else { return 0 }
+        return Int(usable / (readableFontSize * advanceRatio))
+    }
+
+    /// The size the fitted text should end up at — comfortably above the
+    /// shrink-to-fit floor.
+    static let readableFontSize: CGFloat = 9.5
+
     private var fittingColumns: Int {
         paneColumns > 0 ? paneColumns : contentColumns
     }

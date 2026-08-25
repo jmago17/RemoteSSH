@@ -188,6 +188,48 @@ struct TmuxService {
         }
     }
 
+    /// Narrows a session's window so its lines fit the phone, and **only when
+    /// nobody is looking at it on the Mac**.
+    ///
+    /// **Why this is needed at all.** A pane on a desktop terminal is typically
+    /// 162 columns. Fitting 162 columns into an iPhone's ~374pt needs about
+    /// 3.6pt of type — unreadable — so the transcript can only offer sideways
+    /// scrolling. No amount of font fitting solves that: the width is simply
+    /// impossible.
+    ///
+    /// The app already caused the fix by accident. Opening the terminal
+    /// attaches a client, tmux resizes the window to what that client can
+    /// show, and the transcript suddenly looks right — until the client goes
+    /// away and `window-size latest` hands the window back to the Mac's
+    /// dimensions. This does the same resize deliberately, without the
+    /// round-trip through the terminal view.
+    ///
+    /// Guarded three ways:
+    /// - `#{session_attached}` must be 0. If a terminal on the Mac has it
+    ///   open, reflowing it under the user's hands is not the app's business.
+    /// - Only ever narrows. A wider pane is never forced on anyone.
+    /// - Reversible on its own: attaching from the Mac resizes it straight
+    ///   back, because tmux is on `window-size latest`.
+    ///
+    /// - Returns: whether it actually resized, so the caller knows to re-read.
+    @discardableResult
+    func fitWindow(
+        to columns: Int,
+        session name: String,
+        config: SSHConnectionConfig,
+        credential: SSHCredential
+    ) async throws -> Bool {
+        guard columns >= 40 else { return false }
+        return try await withShell(config: config, credential: credential) { shell in
+            // One round trip: ask and act in the same shell, so the answer
+            // can't go stale between the two.
+            let script = """
+            export \(Self.pathPrefix);             info=$(tmux display-message -p -t \(Self.quote(name)) '#{session_attached}|#{pane_width}' 2>/dev/null);             attached=${info%%|*}; width=${info##*|};             if [ "$attached" = "0" ] && [ "${width:-0}" -gt \(columns) ]; then               tmux resize-window -t \(Self.quote(name)) -x \(columns) 2>/dev/null && echo __RESIZED__;             fi
+            """
+            return (try await shell.run(script)).contains("__RESIZED__")
+        }
+    }
+
     // MARK: Copy mode (terminal scrollback)
 
     /// Puts the pane in or out of tmux's copy mode — the only way to see

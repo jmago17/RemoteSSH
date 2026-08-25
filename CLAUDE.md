@@ -1104,3 +1104,55 @@ scroll horizontal, exactamente como en un terminal.
 **Leccion general**: cualquier medida derivada del CONTENIDO es inestable en una
 vista que se refresca sola. Anclar a la geometria de la fuente del dato — aqui,
 el pane — no al dato.
+
+### Scroll horizontal en el raw pane: la anchura era IMPOSIBLE, no mal escalada
+
+El arreglo anterior (sizear a `#{pane_width}` en vez de al contenido) era
+correcto pero **no bastaba**, y conviene entender por que antes de tocar nada
+mas.
+
+**Los numeros**: un pane de escritorio mide **162 columnas**. Meter 162 columnas
+en los ~374pt de un iPhone pide **3.6pt** de letra. El suelo es 7.5pt. **No cabe
+de ninguna manera** — ningun ajuste de fuente arregla una anchura imposible.
+
+**Dos medidas mal leidas por el camino, que costaron tiempo:**
+
+1. `awk '{print length($0)}'` cuenta **BYTES**, no caracteres. Las lineas salian
+   de 486 y el pane era de 162: son las reglas `────`, **3 bytes por glifo**
+   (162 × 3 = 486). Para medir columnas de verdad hay que contar caracteres:
+   ```sh
+   tmux capture-pane -p -J -t X | python3 -c "import sys;print(max(len(l.rstrip()) for l in sys.stdin))"
+   ```
+2. De ahi se dedujo que la culpa era del flag `-J` (unir lineas envueltas).
+   **Falso**: sin `-J` las lineas miden lo mismo. `-J` sigue haciendo falta para
+   el parser de turnos.
+
+**Por que "al volver de la terminal se ve bien y luego se estropea"**: abrir la
+terminal adjunta un cliente, y tmux (con `window-size latest`) encoge la ventana
+a lo que ese cliente puede mostrar. Al cerrarla el cliente se va y la ventana
+vuelve a las dimensiones del Mac. La app ya provocaba el arreglo **por
+accidente**.
+
+**Arreglo**: hacerlo a proposito. `TmuxService.fitWindow` pide
+`resize-window -x <columnas que caben>` al abrir la sesion. Tres guardas:
+
+- **`#{session_attached}` debe ser 0.** Si hay un terminal abierto en el Mac,
+  reflowear la ventana bajo las manos del usuario no es asunto de la app.
+- **Solo estrecha, nunca ensancha.**
+- **Una vez por pantalla abierta**, no en cada refresco: si el usuario ensancha
+  la ventana desde su mesa, la app no debe pelearse con el.
+
+Es **reversible solo**: al hacer attach desde el Mac, `window-size latest` la
+devuelve a su tamano.
+
+**La anchura objetivo son ~61 columnas**, no las 77 que caben al suelo de 7.5pt:
+`TranscriptTurnView.readableFontSize` (9.5pt) es el tamano al que se quiere leer,
+y `columnsThatFit` calcula la anchura que lo consigue. Cambiar la barra de scroll
+por una lupa no es un arreglo.
+
+**Verificado contra tmux real**, con las guardas:
+
+```
+NewsRaider (0 clientes, 162col) -> __RESIZED__ -> 61col, lineas de 61 chars
+RemoteSSH  (1 cliente,  122col) -> no hace nada
+```

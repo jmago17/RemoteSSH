@@ -85,6 +85,13 @@ struct ChatScreen: View {
         } message: {
             Text("Whatever is running in this session is killed with it. tmux can't bring it back.")
         }
+        // The transcript's width is measured, not known up front, so the fit
+        // waits for the first real measurement rather than guessing.
+        .onChange(of: transcriptWidth) { _, width in
+            guard width > 0 else { return }
+            let columns = TranscriptTurnView.columnsThatFit(width: width)
+            Task { await chat?.fitWindowToScreen(columns: columns) }
+        }
         .task {
             model.markRead(sessionName)
             if chat == nil {

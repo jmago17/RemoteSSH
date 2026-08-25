@@ -54,6 +54,8 @@ final class ChatSessionModel {
     /// terminal, reopening the screen) shows stale "working" state until the
     /// user does something that happens to trigger a reload.
     private var pollTask: Task<Void, Never>?
+    /// Guards `fitWindowToScreen` to one attempt per open screen.
+    private var hasFittedWindow = false
 
     init(sessionName: String, config: SSHConnectionConfig) {
         self.sessionName = sessionName
@@ -163,6 +165,23 @@ final class ChatSessionModel {
             return Self.workingPollInterval
         }
         return Self.restingPollInterval
+    }
+
+    /// Asks tmux to narrow the window so its lines fit this screen, once.
+    ///
+    /// Only ever runs when nobody has the session open on the Mac — see
+    /// `TmuxService.fitWindow`. Runs once per screen: re-doing it on every
+    /// refresh would fight a user who deliberately widened the window from
+    /// their desk.
+    func fitWindowToScreen(columns: Int) async {
+        guard !hasFittedWindow, columns >= 40 else { return }
+        hasFittedWindow = true
+        guard let credential = SettingsStore().loadCredential(for: config) else { return }
+        let resized = (try? await TmuxService().fitWindow(
+            to: columns, session: sessionName, config: config, credential: credential
+        )) ?? false
+        // Only worth a round trip back if the pane actually changed shape.
+        if resized { await refresh() }
     }
 
     func stopWatchingClaudeCode() {
