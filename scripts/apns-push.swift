@@ -114,7 +114,11 @@ func bearerToken(_ config: APNSConfig) throws -> String {
     let signature = try key.signature(for: Data(signingInput.utf8)).rawRepresentation
     let jwt = "\(signingInput).\(b64url(signature))"
 
+    // 0600: el JWT es una credencial valida durante una hora — quien lo lea
+    // puede mandar notificaciones a esta app. El fichero por defecto sale
+    // legible por todo el mundo.
     try? JSONEncoder().encode(Cached(jwt: jwt, issued: issued)).write(to: cacheURL)
+    try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: cacheURL.path)
     return jwt
 }
 

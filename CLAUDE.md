@@ -1278,7 +1278,30 @@ gratuito): el problema era la pieza de mas.**
 siempre. Verificado que con APNs sin configurar el camino viejo funciona igual,
 resumen incluido.
 
-**Lo que falta y solo puede hacer Josu**: generar la clave en
-developer.apple.com (Keys → + → APNs). **Solo se puede descargar una vez.**
-Luego `./scripts/setup-apns.sh ~/Downloads/AuthKey_XXXXXXXXXX.p8`, y abrir la
-app una vez en el iPhone con un build que lleve el entitlement nuevo.
+**Estado (2026-08-25)**: clave creada y **configurada en este Mac**
+(`~/.remotessh/apns.json`, key `ZXZM9K4NJ4`, permisos 600). La `.p8` se copio
+FUERA de iCloud a proposito: venia de `iCloud Drive/Downloads` y un `.p8`
+evicted a 0 bytes tumbaria las notificaciones en silencio, igual que ya paso con
+ficheros `.swift`.
+
+**Como validar la mitad servidor sin tener el telefono delante**: mandar un push
+con un token de dispositivo falso.
+
+```sh
+printf '{"token":"%s","environment":"production"}' "$(printf '0%.0s' {1..64})" \
+  > ~/.remotessh/apns-token.json
+~/.claude/hooks/apns-push --session Test --body x
+# -> HTTP 400 {"reason":"BadDeviceToken"}   = JWT ACEPTADO, todo bien
+# -> InvalidProviderToken / ExpiredProviderToken = la clave o el JWT estan mal
+```
+
+`BadDeviceToken` es el resultado BUENO en esa prueba: significa que Apple
+autentico el JWT y solo rechazo el destino, que era falso.
+
+**Falta**: abrir la app una vez en el iPhone con un build que lleve el
+entitlement `aps-environment` (build 14 en adelante). La app escribe sola el
+token en `~/.remotessh/apns-token.json` por SSH.
+
+**Nota de seguridad**: `~/.remotessh/apns-jwt.json` se escribe con **0600**. Es
+una credencial valida una hora: quien la lea puede mandar notificaciones a esta
+app. Por defecto el fichero salia legible por cualquiera.
