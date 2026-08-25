@@ -49,6 +49,9 @@ SECRETS_ENV="${REMOTESSH_SECRETS_ENV:-$HOME/.codex/secrets/cloudflare.env}"
 # Homebrew is not on the default one.
 TMUX_BIN="${TMUX_BIN:-/opt/homebrew/bin/tmux}"
 CURL=/usr/bin/curl
+# Built from scripts/summarise-turn.swift in the repo. Lives here, outside
+# iCloud, for the same reason this script does.
+SUMMARISER="$HOME/.claude/hooks/summarise-turn"
 JQ=/usr/bin/jq
 SECURITY=/usr/bin/security
 
@@ -238,8 +241,27 @@ case "$event" in
         subtitle="ha terminado"
         # last_assistant_message is the real final text — better than scraping
         # the pane, which Claude Code has already hard-wrapped and boxed.
-        body=$(printf '%s' "$payload_json" \
-            | "$JQ" -r '(.last_assistant_message // "") | gsub("\\s+"; " ") | .[0:180]' 2>/dev/null)
+        full=$(printf '%s' "$payload_json" \
+            | "$JQ" -r '(.last_assistant_message // "") | gsub("\\s+"; " ")' 2>/dev/null)
+
+        # Summarise HERE, on the Mac, not on the phone.
+        #
+        # The Mac is the one holding the full text at the moment the push is
+        # built, and macOS has the same on-device model the app uses. Doing it
+        # here means the notification arrives already readable, with no
+        # Notification Service Extension (which would need `mutable-content`, a
+        # field the push provider doesn't expose) and no push infrastructure of
+        # our own. Takes ~4s on this Mac; the Stop hook's timeout is 30.
+        body=""
+        if [ -n "$full" ] && [ -x "$SUMMARISER" ]; then
+            body=$(printf '%s' "$full" | "$SUMMARISER" 2>>"$LOG")
+        fi
+        # Any failure at all — model busy, not provisioned, timed out — falls
+        # back to the raw text. A summariser must never be the reason a
+        # notification doesn't arrive.
+        if [ -z "$body" ]; then
+            body=$(printf '%s' "$full" | "$JQ" -Rr '.[0:180]' 2>/dev/null)
+        fi
         [ -n "$body" ] || body="Turno terminado."
         # Not time-sensitive: "it finished" must not pierce Sleep Focus at 3am.
         level="active"

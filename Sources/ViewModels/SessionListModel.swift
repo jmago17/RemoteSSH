@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 import Observation
 
 /// Drives the session list: foreground polling, unread detection, and the
@@ -221,6 +222,7 @@ final class SessionListModel {
         do {
             let fetched = try await tmux.fetchSessions(config: config, credential: credential)
             sessions = applyUnread(to: fetched)
+            refreshBadge()
             errorMessage = nil
         } catch {
             errorMessage = friendly(error)
@@ -228,12 +230,30 @@ final class SessionListModel {
     }
 
     /// Marks a session read (call when the user opens its thread).
+    /// Puts the unread count on the app icon.
+    ///
+    /// **What this can and cannot do.** It only runs while the app is running,
+    /// because the badge number lives in the push payload otherwise — and the
+    /// push provider in use (Brrr) doesn't expose a `badge` field at all. So
+    /// the badge is right whenever the app has looked recently, and goes stale
+    /// while the app is closed. Making it light up the moment an agent
+    /// finishes needs APNs of our own, which is a different piece of work.
+    ///
+    /// Still worth having on its own: it survives leaving the app with unread
+    /// sessions, which is the case where a dismissed notification would
+    /// otherwise leave no trace at all.
+    private func refreshBadge() {
+        let count = sessions.filter(\.hasUnread).count
+        Task { try? await UNUserNotificationCenter.current().setBadgeCount(count) }
+    }
+
     func markRead(_ name: String) {
         if let session = sessions.first(where: { $0.name == name }) {
             lastSeenHash[name] = session.contentHash
         }
         if let idx = sessions.firstIndex(where: { $0.name == name }) {
             sessions[idx].hasUnread = false
+            refreshBadge()
         }
     }
 

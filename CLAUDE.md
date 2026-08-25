@@ -1156,3 +1156,71 @@ por una lupa no es un arreglo.
 NewsRaider (0 clientes, 162col) -> __RESIZED__ -> 61col, lineas de 61 chars
 RemoteSSH  (1 cliente,  122col) -> no hace nada
 ```
+
+### El resumen se genera en el MAC, no en el iPhone (2026-08-25)
+
+El resumen de Apple Intelligence se generaba en la app, en primer plano, al
+abrirla. Ahora lo genera el **Mac**, dentro del hook, y viaja ya hecho en el
+campo `message` del push.
+
+**Por que ahi y no en una Notification Service Extension** (que era la idea
+obvia para "resumen dentro de la notificacion"): una NSE solo se ejecuta si el
+push lleva `mutable-content: 1`, y **Brrr no expone ese campo**, asi que ni
+arrancaria. Y aunque se montara APNs propio, seria resolver en el sitio dificil
+—una extension con limite de memoria bajo y ~30s— lo que el Mac hace gratis: es
+quien tiene el texto completo en el momento de construir el aviso.
+
+`scripts/summarise-turn.swift` → binario en `~/.claude/hooks/summarise-turn`:
+
+```sh
+xcrun swiftc -swift-version 6 -O scripts/summarise-turn.swift \
+  -o ~/.claude/hooks/summarise-turn
+```
+
+Verificado en este Mac: `SystemLanguageModel.default.availability` → **available**
+(el simulador NO lo tiene, ver la sesion del 21). Medido: **~4.3s** para un turno
+de 576 caracteres; el timeout del hook `Stop` es de 30s. Un texto ya corto sale
+en 10ms **sin invocar el modelo**.
+
+Salvaguardas, porque esto vive en la ruta critica de un aviso:
+
+- Autolimite de **8s** dentro del binario (`asyncAfter` + `exit`).
+- Cualquier fallo → el hook cae al texto crudo recortado. **Un resumidor no
+  puede ser la razon de que no llegue una notificacion.**
+- El resumen se genera **despues** de las guardas de ruido, asi que una sesion
+  que estas mirando no gasta 4s de modelo: medido, 69ms.
+- Corte por palabra, no `prefix` a pelo: cortar a medias deja cosas como
+  "se reconocieran correc" y parece que la notificacion se ha roto.
+
+Payload real capturado (con un servidor local en vez de Brrr):
+
+```
+title      Kaffa
+subtitle   ha terminado
+message    Reescribí el reconocedor de Codex usando el tty del pane y arreglé
+           el fallback textual con rutas relativas, logrando que los tres…
+open_url   remotessh://open/Kaffa
+```
+
+### El globo rojo del icono: lo que se puede y lo que no
+
+**Campos que acepta Brrr** (doc oficial, verificado): `title`, `subtitle`,
+`message`, `thread_id`, `sound`, `volume`, `open_url`, `image_url`, `icon_url`,
+`expiration_date`, `filter_criteria`, `interruption_level`.
+
+**NO acepta `badge`. Ni `category`, ni `mutable-content`.**
+
+Consecuencia que no es obvia: **el globo rojo al llegar el aviso necesita
+exactamente la misma infraestructura que responder desde la notificacion**
+(APNs propio: key `.p8`, un Worker que firme el JWT y hable con
+`api.push.apple.com`, y el device token). No es el objetivo barato que parece.
+
+Lo que SI se hizo sin nada de eso: `SessionListModel.refreshBadge()` pone en el
+icono el numero de sesiones con `hasUnread`, via
+`UNUserNotificationCenter.setBadgeCount`. Se actualiza en cada refresco y al
+marcar una sesion como leida.
+
+**Su limite, con todas las letras**: solo corre mientras la app corre. Es
+correcto justo despues de mirar la app, y se queda viejo mientras esta cerrada
+— que es precisamente cuando un badge seria mas util. Sirve para no perder el
+rastro de sesiones sin leer al salir; NO para enterarte de algo nuevo sin abrir.
