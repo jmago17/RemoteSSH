@@ -230,6 +230,30 @@ struct TmuxService {
         }
     }
 
+    /// Writes a small file on the Mac over SSH.
+    ///
+    /// Used for the APNs device token, which the Mac's push sender reads. The
+    /// content is passed through base64 rather than interpolated into the
+    /// command: a device token is hex and harmless, but a shell command built
+    /// by string concatenation is a habit that eventually meets a value that
+    /// isn't.
+    func writeRemoteFile(
+        _ contents: String,
+        to path: String,
+        config: SSHConnectionConfig,
+        credential: SSHCredential
+    ) async throws {
+        let encoded = Data(contents.utf8).base64EncodedString()
+        let expanded = path.hasPrefix("~/") ? "$HOME/" + path.dropFirst(2) : path
+        try await withShell(config: config, credential: credential) { shell in
+            // mkdir -p first: the directory won't exist before the agent hooks
+            // have ever run.
+            _ = try await shell.run(
+                "mkdir -p \"$(dirname \"\(expanded)\")\" && printf %s \(Self.quote(encoded)) | base64 -d > \"\(expanded)\""
+            )
+        }
+    }
+
     // MARK: Copy mode (terminal scrollback)
 
     /// Puts the pane in or out of tmux's copy mode — the only way to see

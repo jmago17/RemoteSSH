@@ -43,6 +43,12 @@ targets:
       path: RemoteSSH.entitlements
       properties:
         com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(CFBundleIdentifier)
+        # Push notifications. `development` aqui es correcto para builds
+        # firmados por Xcode; los de TestFlight/App Store se re-firman y salen
+        # como `production` solos. NO ponerlo a production a mano: un binario de
+        # desarrollo con token de produccion recibe BadDeviceToken de APNs y no
+        # llega nada, sin mas explicacion.
+        aps-environment: development
     info:
       path: RemoteSSH-Info.plist
       properties:

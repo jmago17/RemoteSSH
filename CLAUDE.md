@@ -1224,3 +1224,61 @@ marcar una sesion como leida.
 correcto justo despues de mirar la app, y se queda viejo mientras esta cerrada
 — que es precisamente cuando un badge seria mas util. Sirve para no perder el
 rastro de sesiones sin leer al salir; NO para enterarte de algo nuevo sin abrir.
+
+### Push propio: el Mac habla con APNs directamente (2026-08-25)
+
+**Por que no vale un proveedor de push de terceros**: la notificacion pertenece
+a SU app, asi que el globo rojo aparece en el icono de esa app, no en el de
+RemoteSSH. No es un campo que falte en su API — se deduce de quien recibe el
+push. Para badgear nuestro icono, el push tiene que ser nuestro.
+
+**Por que NO hay un Worker de Cloudflare en medio**, que era el plan inicial.
+APNs solo exige dos cosas y el Mac tiene las dos (verificado, no supuesto):
+
+```
+curl del sistema        -> HTTP2
+api.push.apple.com      -> responde HTTP/2 desde este Mac
+CryptoKit P256          -> firma de 64 bytes r||s, que es lo que pide JWS
+```
+
+El hook ya corre en el Mac. Un relay solo anadiria una pieza que mantener, un
+secreto que rotar, un punto de fallo, y obligaria a subir la clave `.p8` a un
+tercero. **El coste de Cloudflare no era el problema (todo cabia en el plan
+gratuito): el problema era la pieza de mas.**
+
+**Piezas**
+
+| Fichero | Que hace |
+|---|---|
+| `scripts/apns-push.swift` → `~/.claude/hooks/apns-push` | firma el JWT y hace POST a APNs |
+| `scripts/setup-apns.sh` | deja `~/.remotessh/apns.json` listo a partir del `.p8` |
+| `Sources/Services/APNSRegistration.swift` | la app sube su device token **por SSH** |
+| `~/.remotessh/badge` | contador que lleva el Mac; la app lo pone a 0 al abrirse |
+
+**Trampas de APNs, todas ya cubiertas en el codigo:**
+
+- **`sandbox` vs `production`**: depende de como se firmo el binario, no de una
+  preferencia. Debug → sandbox, TestFlight/App Store → production. Cruzarlos da
+  `BadDeviceToken` y **no llega nada, sin explicacion**. Por eso la app graba el
+  entorno junto al token en vez de dejar que el emisor lo adivine.
+- **`aps-environment: development`** en el entitlement es lo correcto tambien
+  para TestFlight: Apple re-firma y lo convierte a production. Ponerlo a
+  production a mano rompe los builds de desarrollo.
+- **El JWT se cachea** en `~/.remotessh/apns-jwt.json` (45 min): Apple exige
+  renovarlo al menos cada hora y **no mas de una vez cada 20 minutos**. Un hook
+  es un proceso efimero y sin cache firmaria uno por aviso.
+- **`rawRepresentation`** de la firma P256 es `r||s`, que es lo que espera JWS —
+  NO la codificacion DER que devuelven otras librerias.
+- El cuerpo de la respuesta de error trae el motivo real (`BadDeviceToken`,
+  `ExpiredProviderToken`, `TopicDisallowed`). Se registra: sin eso, depurar APNs
+  es adivinar.
+
+**Migracion sin apagar nada**: el hook usa APNs **solo si** existe
+`~/.remotessh/apns.json` Y el binario. Si falla el envio, cae al proveedor de
+siempre. Verificado que con APNs sin configurar el camino viejo funciona igual,
+resumen incluido.
+
+**Lo que falta y solo puede hacer Josu**: generar la clave en
+developer.apple.com (Keys → + → APNs). **Solo se puede descargar una vez.**
+Luego `./scripts/setup-apns.sh ~/Downloads/AuthKey_XXXXXXXXXX.p8`, y abrir la
+app una vez en el iPhone con un build que lleve el entitlement nuevo.

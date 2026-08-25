@@ -109,6 +109,7 @@ struct SessionListView: View {
             switch phase {
             case .active:
                 model.startPolling()
+                model.clearBadge()
             case .background:
                 model.stopPolling()
             case .inactive:

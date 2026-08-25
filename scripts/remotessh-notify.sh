@@ -52,6 +52,11 @@ CURL=/usr/bin/curl
 # Built from scripts/summarise-turn.swift in the repo. Lives here, outside
 # iCloud, for the same reason this script does.
 SUMMARISER="$HOME/.claude/hooks/summarise-turn"
+# Push directo a APNs desde este Mac. Solo se usa si esta configurado
+# (~/.remotessh/apns.json + el token que escribe la app); si no, se cae al
+# proveedor de terceros de siempre.
+APNS_PUSH="$HOME/.claude/hooks/apns-push"
+BADGE_FILE="$HOME/.remotessh/badge"
 JQ=/usr/bin/jq
 SECURITY=/usr/bin/security
 
@@ -293,6 +298,30 @@ case "$event" in
         exit 0
         ;;
 esac
+
+# --- Badge ------------------------------------------------------------------
+#
+# El Mac lleva la cuenta porque es quien sabe que ha pasado mientras el telefono
+# no miraba. La app lo pone a cero al abrirse (borrando este fichero por SSH),
+# que es la unica definicion de "ya lo he visto" que existe aqui.
+badge=""
+if [ -x "$APNS_PUSH" ] && [ -f "$HOME/.remotessh/apns.json" ]; then
+    mkdir -p "$(dirname "$BADGE_FILE")" 2>/dev/null
+    badge=$(( $(cat "$BADGE_FILE" 2>/dev/null || echo 0) + 1 ))
+    printf '%s' "$badge" > "$BADGE_FILE" 2>/dev/null
+
+    # Push propio primero. Su ventaja entera sobre el proveedor de terceros es
+    # esta: la notificacion es de RemoteSSH, asi que el globo rojo sale en SU
+    # icono. Con un servicio ajeno el badge acaba en el icono del servicio.
+    if "$APNS_PUSH" --session "$session" --subtitle "$subtitle" --body "$body" \
+        --badge "$badge" --level "$level" >>"$LOG" 2>>"$LOG"; then
+        log "sent via APNs ($session): $subtitle [badge $badge]"
+        exit 0
+    fi
+    # Si APNs falla, seguimos al proveedor de terceros. Un aviso que llega por
+    # el camino viejo es mejor que ninguno.
+    log "APNs fallo ($session), cayendo al proveedor de terceros"
+fi
 
 # --- Secret -----------------------------------------------------------------
 secret="${BRRR_WEBHOOK_SECRET:-}"

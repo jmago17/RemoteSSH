@@ -230,6 +230,13 @@ final class SessionListModel {
     }
 
     /// Marks a session read (call when the user opens its thread).
+    /// Hands the APNs device token to the Mac, which is the thing that sends
+    /// the notifications. See `APNSRegistration`.
+    func storeAPNSToken(_ token: Data) async {
+        guard isConfigured, let credential = store.loadCredential(for: config) else { return }
+        await APNSRegistration.upload(deviceToken: token, config: config, credential: credential)
+    }
+
     /// Puts the unread count on the app icon.
     ///
     /// **What this can and cannot do.** It only runs while the app is running,
@@ -245,6 +252,22 @@ final class SessionListModel {
     private func refreshBadge() {
         let count = sessions.filter(\.hasUnread).count
         Task { try? await UNUserNotificationCenter.current().setBadgeCount(count) }
+    }
+
+    /// Clears the badge, here and on the Mac.
+    ///
+    /// The Mac keeps the count because it is the side that knows what happened
+    /// while the phone wasn't looking; opening the app is the only definition
+    /// of "seen" available, so this is where it resets. Best-effort on the
+    /// remote half — a badge that clears one notification late is a small
+    /// price next to blocking the launch on an SSH round trip.
+    func clearBadge() {
+        Task { try? await UNUserNotificationCenter.current().setBadgeCount(0) }
+        guard isConfigured, let credential = store.loadCredential(for: config) else { return }
+        let config = self.config
+        Task {
+            try? await tmux.writeRemoteFile("0", to: "~/.remotessh/badge", config: config, credential: credential)
+        }
     }
 
     func markRead(_ name: String) {
