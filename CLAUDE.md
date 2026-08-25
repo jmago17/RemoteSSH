@@ -1305,3 +1305,40 @@ token en `~/.remotessh/apns-token.json` por SSH.
 **Nota de seguridad**: `~/.remotessh/apns-jwt.json` se escribe con **0600**. Es
 una credencial valida una hora: quien la lea puede mandar notificaciones a esta
 app. Por defecto el fichero salia legible por cualquiera.
+
+### El token de APNs no subia: una carrera que podia perderse SIEMPRE
+
+Build 22 (`ee7ecb2`) instalado, con el entitlement y la capability correctos, y
+aun asi `~/.remotessh/apns-token.json` no aparecia nunca. El badge SI se
+escribia (`~/.remotessh/badge`, por SSH), asi que el canal funcionaba: el fallo
+estaba antes.
+
+**La causa**: el token se subia directamente desde el callback del delegate,
+detras de un `guard isConfigured, let credential = …`. iOS entrega el token a
+los pocos instantes del arranque, **normalmente antes de que el modelo haya
+leido las credenciales SSH**. El guard fallaba, el token se tiraba, y **nada
+reintentaba**. No es una carrera que a veces falle: puede fallar todas.
+
+**Arreglo**: `APNSRegistration.remember` guarda el token en cuanto llega, pase
+lo que pase, y `uploadPendingIfNeeded` lo sube en el primer `refresh()` con
+credenciales — que es el primer momento en que se sabe que funcionan. Idempotente,
+asi que en el caso normal no hace nada.
+
+**El error de fondo, que es el que hay que no repetir**: los dos caminos de
+fallo eran **silenciosos**. `didFailToRegisterForRemoteNotifications` no dejaba
+rastro "para que un fallo de push no molestara", y el `catch` de la subida
+estaba vacio. Desde el Mac, "no hay fichero de token" se ve igual tanto si iOS
+nunca dio token, como si la subida fallo, como si la app no se ha abierto. Sin
+esa distincion no se puede arreglar nada — solo adivinar.
+
+Ahora hay una fila **Push** en Ajustes → Notificaciones con el estado real:
+
+| Estado | Que significa |
+|---|---|
+| `Not registered yet` | iOS aun no ha dado token |
+| `Registration failed: …` | iOS rechazo el registro, con el motivo |
+| `Token held, not yet sent to the Mac` | hay token, falta subirlo (o la subida fallo) |
+| `Sent to the Mac (production)` | listo; el entorno debe cuadrar con la clave |
+
+**Regla general**: en algo que solo se puede diagnosticar desde el otro lado de
+un cable, un fallo silencioso no es prudencia, es quedarse ciego.

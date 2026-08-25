@@ -224,19 +224,16 @@ final class SessionListModel {
             sessions = applyUnread(to: fetched)
             refreshBadge()
             errorMessage = nil
+            // Cheap and idempotent: does nothing once the token is up. Here
+            // rather than in the delegate callback because this is the first
+            // moment we're certain there are working credentials.
+            await APNSRegistration.uploadPendingIfNeeded(config: config, credential: credential)
         } catch {
             errorMessage = friendly(error)
         }
     }
 
     /// Marks a session read (call when the user opens its thread).
-    /// Hands the APNs device token to the Mac, which is the thing that sends
-    /// the notifications. See `APNSRegistration`.
-    func storeAPNSToken(_ token: Data) async {
-        guard isConfigured, let credential = store.loadCredential(for: config) else { return }
-        await APNSRegistration.upload(deviceToken: token, config: config, credential: credential)
-    }
-
     /// Puts the unread count on the app icon.
     ///
     /// **What this can and cannot do.** It only runs while the app is running,

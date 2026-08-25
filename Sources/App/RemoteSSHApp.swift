@@ -5,23 +5,20 @@ import UIKit
 /// hook, so the token arrives through the old delegate whether we like it or
 /// not.
 final class AppDelegate: NSObject, UIApplicationDelegate {
-    /// Set by the scene once the model exists, since the token can land before
-    /// or after SwiftUI has built anything.
-    @MainActor static var onToken: ((Data) -> Void)?
-    /// Held for the case where the token arrives first.
-    @MainActor static var pendingToken: Data?
-
     func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken token: Data) {
-        Task { @MainActor in
-            if let handler = Self.onToken { handler(token) } else { Self.pendingToken = token }
-        }
+        // Stored unconditionally. Whether anything can upload it right now is
+        // a separate question, answered on the next refresh — see
+        // `APNSRegistration.remember`.
+        Task { @MainActor in APNSRegistration.remember(deviceToken: token) }
     }
 
     func application(_ application: UIApplication,
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        // Nothing to do: without a token the Mac keeps using the transport it
-        // was using before, so this degrades rather than breaks.
+        // Recorded, not swallowed. Silence here is what made the first
+        // diagnosis guesswork: "iOS never gave us a token" and "the upload
+        // failed" looked identical from the Mac.
+        Task { @MainActor in APNSRegistration.registrationFailed(error) }
     }
 }
 
@@ -51,13 +48,6 @@ struct RemoteSSHApp: App {
 
                     // Push registration. The token goes to the Mac, which is
                     // what actually sends the notifications.
-                    AppDelegate.onToken = { token in
-                        Task { await model.storeAPNSToken(token) }
-                    }
-                    if let pending = AppDelegate.pendingToken {
-                        AppDelegate.pendingToken = nil
-                        Task { await model.storeAPNSToken(pending) }
-                    }
                     APNSRegistration.register()
                 }
                 .onOpenURL { url in

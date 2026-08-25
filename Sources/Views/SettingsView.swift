@@ -237,6 +237,16 @@ struct SettingsView: View {
                         .multilineTextAlignment(.trailing)
                 }
             }
+            // Push registration, shown rather than hidden. Diagnosing this
+            // from the Mac alone is impossible: an absent token file looks the
+            // same whether iOS refused to register, or the upload failed, or
+            // the app simply hasn't been opened since.
+            LabeledContent("Push") {
+                Text(APNSRegistration.status.summary)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.trailing)
+            }
         } header: {
             SectionHeaderText("Notifications")
         } footer: {
