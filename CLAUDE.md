@@ -1074,3 +1074,33 @@ Ojo al usarlo: el fichero crece tambien con las reinyecciones de prueba, asi que
 un `tail -1` puede no ser el payload que crees. Filtrar por
 `grep '"hook_event_name":"Stop"'`. Y borrarlo al terminar: lleva los prompts y
 los cwd reales.
+
+### El raw pane se descuadraba al llegar texto nuevo (2026-08-25)
+
+Sintoma (iPhone): al volver de la vista terminal el bloque se ve bien, **hasta
+que el agente imprime una linea nueva**; entonces se desconfigura.
+
+**Causa**: `TranscriptTurnView` escalaba la fuente para que cupiera **la linea
+mas larga del contenido** (`contentColumns`). Esa medida cambia cada vez que
+llega salida, asi que el tamaño de letra cambiaba con ella y **el bloque entero
+se re-dibujaba**. Volver de la terminal se veia bien justo porque acababa de
+recalcularse; la siguiente linea lo deshacia.
+
+Medido con el arnes `<scratchpad>/width/`, alimentado por el parser real:
+
+```
+sin pane_width:  12.50pt -> 7.50pt   al llegar una linea larga   <- el descuadre
+con pane_width:   9.56pt -> 9.56pt   (no depende del texto)
+```
+
+**Arreglo**: sizear a `#{pane_width}`, las columnas REALES del pane, que es la
+regla que sigue un terminal — y que solo cambia cuando cambia el pane, no cuando
+cambia el texto. El scrollback escrito cuando el pane era mas ancho se sale al
+scroll horizontal, exactamente como en un terminal.
+
+`contentColumns` se conserva como fallback para cuando tmux no dio el ancho
+(un `PaneSnapshot` construido desde texto plano).
+
+**Leccion general**: cualquier medida derivada del CONTENIDO es inestable en una
+vista que se refresca sola. Anclar a la geometria de la fuente del dato — aqui,
+el pane — no al dato.

@@ -273,14 +273,15 @@ struct TmuxService {
         // Claude Code puts the current task there and it may contain spaces —
         // and `|` — so the tail is rejoined rather than indexed.
         let info = (try? await shell.run(
-            "\(pathPrefix) tmux display-message -p -t \(quote(name)) '#{alternate_on}|#{pane_current_command}|#{pane_tty}|#{pane_height}|#{pane_id}|#{pane_title}' 2>/dev/null || true"
+            "\(pathPrefix) tmux display-message -p -t \(quote(name)) '#{alternate_on}|#{pane_current_command}|#{pane_tty}|#{pane_height}|#{pane_width}|#{pane_id}|#{pane_title}' 2>/dev/null || true"
         )) ?? ""
 
         let parts = info.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "|", omittingEmptySubsequences: false)
         let command = parts.count > 1 ? String(parts[1]) : ""
         let tty = parts.count > 2 ? String(parts[2]) : ""
         let height = parts.count > 3 ? Int(parts[3]) ?? 0 : 0
-        let pane = parts.count > 4 ? String(parts[4]) : ""
+        let paneWidth = parts.count > 4 ? Int(parts[4]) ?? 0 : 0
+        let pane = parts.count > 5 ? String(parts[5]) : ""
 
         // A second round trip, but only for panes whose process name explains
         // nothing. Codex reports as a bare `node`, so without this it is
@@ -312,8 +313,9 @@ struct TmuxService {
             text: text,
             alternateScreen: parts.first.map { $0 == "1" } ?? false,
             currentCommand: command,
-            paneTitle: parts.count > 5 ? parts[5...].joined(separator: "|") : "",
+            paneTitle: parts.count > 6 ? parts[6...].joined(separator: "|") : "",
             paneHeight: height,
+            paneWidth: paneWidth,
             foregroundProcesses: foreground,
             agentState: paneState
         )

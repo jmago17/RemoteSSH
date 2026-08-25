@@ -16,6 +16,8 @@ struct TranscriptTurnView: View {
     /// until the first layout pass, which simply means "don't shrink anything
     /// yet".
     let availableWidth: CGFloat
+    /// The pane's real column count, when tmux told us. See `fittingColumns`.
+    var paneColumns: Int = 0
     let onToggleExpanded: () -> Void
 
     /// Lines shown before an output block is collapsed. A 5000-line build log
@@ -261,8 +263,28 @@ struct TranscriptTurnView: View {
     /// 460pt and an iPhone offers about 360pt. The last columns were simply
     /// off-screen, and the only way to see them was to notice the block
     /// scrolled sideways at all.
+    /// The column count to size the type to.
+    ///
+    /// **The pane's own width, not the longest line in the block.** Sizing to
+    /// the content looks right in a screenshot and is unusable in motion: the
+    /// widest line changes every time the agent prints something, so the font
+    /// size changes with it and the whole block visibly re-flows on every
+    /// refresh. Coming back from the terminal looked fine precisely because
+    /// the size had just been recomputed — the next line of output undid it.
+    ///
+    /// The pane's width is the stable answer, and it's the same rule a
+    /// terminal follows: fit the columns the session actually has. Scrollback
+    /// written when the pane was wider still overflows into the horizontal
+    /// scroll, which is what a terminal does too.
+    ///
+    /// Falls back to the content when tmux didn't say (an older snapshot, a
+    /// transcript built from plain text).
+    private var fittingColumns: Int {
+        paneColumns > 0 ? paneColumns : contentColumns
+    }
+
     private var outputFontSize: CGFloat {
-        let columns = contentColumns
+        let columns = fittingColumns
         guard columns > 0, availableWidth > 0 else { return Self.baseOutputFontSize }
         let usable = availableWidth - Self.blockPadding
         guard usable > 0 else { return Self.baseOutputFontSize }

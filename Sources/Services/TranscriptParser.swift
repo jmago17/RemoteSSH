@@ -43,6 +43,9 @@ struct Transcript: Hashable, Sendable {
     /// `nil` when the pane really was parsed into turns. Otherwise the reason
     /// the parser gave up and fell back to a single `.raw` block.
     var fallback: Fallback?
+    /// The pane's column count, carried through so blocks can size to the
+    /// terminal instead of to their own contents. 0 when unknown.
+    var paneColumns: Int = 0
     /// Set when the pane is running a coding agent. The frame is still shown
     /// raw — we summarise its state, we never re-render its body.
     var agent: AgentStatus?
@@ -96,6 +99,11 @@ struct PaneSnapshot: Hashable, Sendable {
     /// tmux `#{pane_height}` — rows in the pane, i.e. how much of `text` is
     /// the *screen* rather than scrollback. See `visibleScreen`.
     var paneHeight: Int
+    /// tmux `#{pane_width}` — the pane's real column count.
+    ///
+    /// The transcript sizes its monospaced blocks to this rather than to the
+    /// longest line it happens to be holding. See `TranscriptTurnView`.
+    var paneWidth: Int
     /// Raw `ps -t <pane_tty> -o stat=,args=` output: every process attached to
     /// the pane's terminal, one per line, each prefixed with its state.
     ///
@@ -122,6 +130,7 @@ struct PaneSnapshot: Hashable, Sendable {
         currentCommand: String = "",
         paneTitle: String = "",
         paneHeight: Int = 0,
+        paneWidth: Int = 0,
         foregroundProcesses: String = "",
         agentState: AgentState? = nil
     ) {
@@ -130,6 +139,7 @@ struct PaneSnapshot: Hashable, Sendable {
         self.currentCommand = currentCommand
         self.paneTitle = paneTitle
         self.paneHeight = paneHeight
+        self.paneWidth = paneWidth
         self.foregroundProcesses = foregroundProcesses
         self.agentState = agentState
     }
@@ -232,6 +242,12 @@ enum TranscriptParser {
 
     /// Parses a pane, using what tmux told us about it.
     static func parse(_ snapshot: PaneSnapshot) -> Transcript {
+        var result = parseBody(snapshot)
+        result.paneColumns = snapshot.paneWidth
+        return result
+    }
+
+    private static func parseBody(_ snapshot: PaneSnapshot) -> Transcript {
         let lines = normalise(snapshot.text)
         guard !lines.isEmpty else { return .empty }
 

@@ -246,6 +246,7 @@ struct ChatScreen: View {
                             turn: turn,
                             isExpanded: expandedTurns.contains(turn.id),
                             availableWidth: transcriptWidth,
+                            paneColumns: chat.transcript.paneColumns,
                             onToggleExpanded: { toggle(turn.id) }
                         )
                         .id(turn.id)
