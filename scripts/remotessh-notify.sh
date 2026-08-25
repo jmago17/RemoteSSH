@@ -65,6 +65,12 @@ log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG" 2>/dev/nu
 if [ -n "$1" ]; then payload_json="$1"; else payload_json=$(cat); fi
 [ -n "$payload_json" ] || exit 0
 
+# Payload capture, for when an agent's hook contract needs checking rather
+# than guessing. Off unless the marker file exists:
+#   touch ~/.claude/hooks/DEBUG      # start capturing
+#   rm    ~/.claude/hooks/DEBUG      # stop
+[ -f "$HOME/.claude/hooks/DEBUG" ] && printf '%s\n' "$payload_json" >> "$HOME/.claude/hooks/payloads.jsonl" 2>/dev/null
+
 event=$(printf '%s' "$payload_json" | "$JQ" -r '.hook_event_name // .type // empty' 2>/dev/null)
 session_id=$(printf '%s' "$payload_json" | "$JQ" -r '.session_id // .sessionId // empty' 2>/dev/null)
 
@@ -129,12 +135,38 @@ write_state() {
     return 0
 }
 
-# Codex and Claude Code share this script; the app shows the product name.
-case "${CODEX_HOME:-}${CODEX_SANDBOX:-}" in
-    ?*) agent_kind="codex" ;;
-    *)  agent_kind=$(printf '%s' "$payload_json" | "$JQ" -r 'if .type then "codex" else "claude-code" end' 2>/dev/null) ;;
+# --- Which agent is this? --------------------------------------------------
+#
+# Both write the SAME payload shape — `hook_event_name`, `session_id`,
+# `last_assistant_message` — which is why one script can serve both, and also
+# why the event name can't tell them apart. The first attempt guessed from a
+# `type` field that Codex turned out not to send, so every Codex session was
+# labelled "Claude Code" in the app.
+#
+# `transcript_path` is the honest answer: each agent writes its transcript
+# under its own home.
+#   Codex:       ~/.codex/sessions/2026/08/25/rollout-….jsonl
+#   Claude Code: ~/.claude/projects/…
+transcript=$(printf '%s' "$payload_json" | "$JQ" -r '.transcript_path // empty' 2>/dev/null)
+case "$transcript" in
+    */.codex/*)  agent_kind="codex" ;;
+    */.claude/*) agent_kind="claude-code" ;;
+    *)
+        # No transcript_path (an older build, a trimmed payload). Fall back to
+        # the environment the agent's own process carries, then to the model
+        # name, then assume the one this file was written for.
+        if [ -n "${CODEX_HOME:-}${CODEX_MANAGED_PACKAGE_ROOT:-}${CODEX_SANDBOX:-}" ]; then
+            agent_kind="codex"
+        else
+            model=$(printf '%s' "$payload_json" | "$JQ" -r '.model // empty' 2>/dev/null)
+            case "$model" in
+                claude*) agent_kind="claude-code" ;;
+                gpt*|o1*|o3*|o4*) agent_kind="codex" ;;
+                *) agent_kind="claude-code" ;;
+            esac
+        fi
+        ;;
 esac
-[ -n "$agent_kind" ] || agent_kind="claude-code"
 
 # --- Turn-start stamp, written by the UserPromptSubmit hook -----------------
 stamp_file="${TMPDIR:-/tmp}/remotessh-turn-${session_id:-unknown}"

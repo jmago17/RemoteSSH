@@ -1025,3 +1025,52 @@ tocar nada). Usar `printf '%s'`.
 
 **Sin probar en dispositivo**: todo esto compila y pasa arneses contra panes
 reales, pero no se ha visto en el iPhone.
+
+### Codex tambien publica estado (2026-08-25)
+
+**Codex usa EL MISMO contrato de payload que Claude Code** — verificado
+capturando payloads reales, no supuesto: `hook_event_name`, `session_id`,
+`last_assistant_message`. Nada de `type` ni `sessionId`. Por eso un solo script
+sirve a los dos, y por eso el nombre del evento **no** distingue quien lo manda.
+
+**El bug que eso provocaba**: la primera version adivinaba el agente por un
+campo `type` que Codex no envia, asi que **toda sesion de Codex se etiquetaba
+"Claude Code"** en la app. El estado era correcto; la identidad no.
+
+**El discriminador bueno es `transcript_path`**, porque cada agente escribe su
+transcript en su propia casa:
+
+```
+Codex:       ~/.codex/sessions/2026/08/25/rollout-….jsonl
+Claude Code: ~/.claude/projects/…
+```
+
+Cascada, por si algun dia falta ese campo: `transcript_path` → variables
+`CODEX_*` del entorno (`CODEX_MANAGED_PACKAGE_ROOT` esta presente en la
+instalacion por npm) → el campo `model` (`claude*` / `gpt*`).
+
+**Eventos de Codex: se dejan los tres que ya tenia** (`UserPromptSubmit`,
+`Stop`, `PermissionRequest`) y NO se añaden `SessionStart`/`SessionEnd`/
+`StopFailure`. Comprobado que **Codex no dispara nada al arrancar**, asi que
+esos eventos probablemente ni existen ahi; y lo unico que aportaria `SessionEnd`
+es borrar un fichero que la app ya descarta por obsoleto en cuanto el pane deja
+de correr un agente. Tocar `config.toml` tiene riesgo (ahi vive Computer Use) y
+beneficio marginal.
+
+**Recordatorio**: los hooks de Codex solo cargan si el directorio esta
+**confiado**. Al abrir Codex en una carpeta nueva pregunta *"Do you trust the
+contents of this directory?"*, y responder que no significa, textualmente, que
+no se carguen hooks — o sea, ningun estado y ninguna notificacion para esa
+sesion.
+
+**Depuracion de payloads**, ya integrada en el script:
+
+```sh
+touch ~/.claude/hooks/DEBUG     # empieza a volcar a ~/.claude/hooks/payloads.jsonl
+rm    ~/.claude/hooks/DEBUG     # para
+```
+
+Ojo al usarlo: el fichero crece tambien con las reinyecciones de prueba, asi que
+un `tail -1` puede no ser el payload que crees. Filtrar por
+`grep '"hook_event_name":"Stop"'`. Y borrarlo al terminar: lleva los prompts y
+los cwd reales.
