@@ -63,6 +63,7 @@ struct SettingsView: View {
             notificationsEnabled = store.notificationsEnabled
             ntfyServer = store.ntfyServer
             ntfyTopic = store.ntfyTopic
+            pushStatus = APNSRegistration.status.summary
         }
     }
 
@@ -242,7 +243,12 @@ struct SettingsView: View {
             // same whether iOS refused to register, or the upload failed, or
             // the app simply hasn't been opened since.
             LabeledContent("Push") {
-                Text(APNSRegistration.status.summary)
+                // Re-read each time the sheet appears. The upload happens on
+                // the first refresh with credentials, which can easily land
+                // *after* this row was first built — and a row stuck on "not
+                // yet sent" when it already went sent us looking in the wrong
+                // place for an evening.
+                Text(pushStatus)
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.trailing)
@@ -256,6 +262,10 @@ struct SettingsView: View {
         }
         .listRowBackground(Theme.surface)
     }
+
+    /// Mirrored into state so the row refreshes; `APNSRegistration.status`
+    /// reads UserDefaults, which SwiftUI has no reason to watch.
+    @State private var pushStatus = APNSRegistration.status.summary
 
     private var pollingSection: some View {
         Section {

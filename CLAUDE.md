@@ -1342,3 +1342,22 @@ Ahora hay una fila **Push** en Ajustes → Notificaciones con el estado real:
 
 **Regla general**: en algo que solo se puede diagnosticar desde el otro lado de
 un cable, un fallo silencioso no es prudencia, es quedarse ciego.
+
+### FUNCIONA: primer push propio entregado (2026-08-26)
+
+```
+~/.claude/hooks/apns-push --session Prueba --body "…" --badge 3   ->  OK
+```
+
+Token en el Mac: `~/.remotessh/apns-token.json`, entorno **production** (viene
+de TestFlight, como debe). Notificacion entregada por RemoteSSH, con globo rojo
+en SU icono — que era el objetivo entero y lo unico que un proveedor de terceros
+no puede dar.
+
+**Un despiste que costo un rato**: la fila "Push" de Ajustes decia
+`Token held, not yet sent to the Mac` cuando el token YA estaba subido. La fila
+leia `APNSRegistration.status` (que consulta UserDefaults) al construir la
+vista, y SwiftUI no tiene motivo para observar UserDefaults: la subida ocurre en
+el primer `refresh()` con credenciales, que perfectamente puede pasar despues.
+Arreglado releyendo en `onAppear`. **Un indicador de diagnostico que se queda
+viejo es peor que no tenerlo**: manda a buscar donde no es.
