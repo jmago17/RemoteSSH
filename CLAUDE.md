@@ -15,33 +15,53 @@ Repo **publico** en GitHub. No commitear nada sensible.
 
 ## Donde esta ahora
 
-**Publicado en GitHub como repo publico**: https://github.com/jmago17/RemoteSSH
-`main` con tracking a `origin/main`, todas las ramas de feature mergeadas
-(`feature/chat-view`, `chat-polish`, `claude-code-status`, `tmux-shortcuts`).
+Repo publico: https://github.com/jmago17/RemoteSSH — `main` con tracking a
+`origin/main`, todas las ramas de feature mergeadas.
 
-Las 5 fases previstas se completaron en sesiones anteriores (Brrr push,
-generacion de claves in-app, pinning TOFU de host key, restore con
-tmux-resurrect, multi-host). Despues vino rediseño + iPad + teclado, luego la
-vista conversacional, el estado de Claude Code, los App Intents y el resumen
-con Apple Intelligence.
+**Se distribuye por TestFlight interno via Xcode Cloud.** El workflow es
+"Internal TestFlight Build" y dispara solo con cada push a `main`. Compila en
+verde para iPhone 17 Pro e iPad Pro 11" (M5), iOS 27.
 
-Compila en verde en iPhone 17 Pro y iPad Pro 11" (M5), iOS 27.
+Identidad: bundle id **`com.maromeapps.RemoteSSH`**, version **1.0**, App Apple
+ID 6804001421.
 
-**OJO con la documentacion de estado**: el `ESTADO.md` de `_MinisBackup` se
-quedo anclado en `aea84dc` / "22 commits" mientras el repo seguia avanzando.
-Antes de fiarte de cualquiera de los dos ficheros, contrasta con
-`git log --oneline -5`.
+**Como funciona hoy, una frase por pieza:**
+
+- **La app lee el Mac por SSH bajo demanda.** No hay servidor, ni daemon, ni
+  nada persistente que mantener — tmux ya es el daemon de PTYs.
+- **El estado de los agentes lo publican sus propios hooks**, ya no se deduce de
+  la pantalla: `~/.claude/settings.json` y `~/.codex/config.toml` ejecutan
+  `~/.claude/hooks/remotessh-notify.sh`, que escribe
+  `~/.remotessh/state/<pane>.json`. El parser de pantalla sigue como fallback.
+- **Las notificaciones salen del propio Mac a APNs**, sin intermediarios: el
+  hook firma un JWT ES256 con la clave `.p8` y hace POST a
+  `api.push.apple.com`. Brrr queda de respaldo si eso falla.
+- **El resumen de Apple Intelligence se genera en el Mac**, no en el telefono, y
+  viaja ya hecho en el cuerpo de la notificacion.
+- **El badge del icono** lo lleva `~/.remotessh/badge`: lo incrementa el hook y
+  la app lo pone a cero al abrirse.
+
+**Que NO se ha probado nunca en dispositivo** (el simulador arranca headless,
+ver Trabas): el menu de slot con pulsacion larga, la altura del
+`ExpandedKeyPanel`, y la barra de historial de copy-mode.
 
 ## Pendiente
 
-- **Verificar en hardware real** (no se pudo por simulador, ver Trabas):
-  - menu de configuracion de slot con pulsacion larga
-  - altura del `ExpandedKeyPanel` (260pt telefono / 300pt iPad)
-- **Franja de atajos `⌘N new · ⌘R refresh · ⌘, settings`** del mock de diseño:
-  no se llego a renderizar. Los atajos SI funcionan, solo falta el hint visual.
-- Sin `README` de instalacion/uso orientado a terceros ahora que el repo es
-  publico.
-
+- **Ver un push propio disparado por un agente de verdad.** El envio manual
+  funciona (`apns-push` → `OK`, notificacion entregada con badge). Falta el
+  camino entero cuando un agente termina solo. Se distingue en
+  `~/.claude/hooks/remotessh-notify.log`: `sent via APNs` es el camino nuevo,
+  `sent` a secas es el respaldo de Brrr.
+- **Codex no publica `SessionEnd`/`StopFailure`** (no dispara nada al arrancar,
+  probablemente no existen ahi). Sus tres eventos cubren working/idle/awaiting,
+  que es lo que la UI muestra.
+- **Retirar Brrr** cuando el push propio lleve tiempo sin fallar: mantener los
+  dos duplica rutas de aviso.
+- **Franja de atajos `⌘N · ⌘R · ⌘,`** del mock: los atajos funcionan, falta el
+  hint visual. Ojo: **`⌘R` ya no existe** desde que se quito el menu `⋯`.
+- Sin `README` de instalacion orientado a terceros, con el repo ya publico.
+- **Sospecha sin confirmar**: la app deja panes a 1 fila de alto. Apunta a un
+  `resize` enviado antes de conocer la altura de la vista.
 
 ## Compilar
 
@@ -87,20 +107,76 @@ bastar si el pack tambien esta evicted.
 
 ## Firma / App Store Connect
 
-macOS 27 no admite ninguna version estable de Xcode, asi que el unico SDK es
-iOS 27 **beta** y App Store Connect rechaza esos binarios. Pendiente montar
-Xcode Cloud (ver `_infra/TRASPASO_CLAUDE_CODE.md`).
+**Ya NO esta bloqueado.** Lo que decia esta seccion — que App Store Connect
+rechazaba los binarios del SDK beta y quedaba pendiente montar Xcode Cloud —
+dejo de ser cierto el 2026-08-23. Se entrega a TestFlight con normalidad.
 
-El llavero se re-bloquea solo y da `errSecInternalComponent` al firmar.
-**No pedirle a Josu la contraseña del llavero**: firmar con Run manual desde
-Xcode.
+El llavero se re-bloquea solo y da `errSecInternalComponent` al firmar por
+terminal. **No pedirle a Josu la contraseña del llavero**: se desbloquea con un
+`Run` manual desde Xcode.
+
+Lo aprendido peleandose con esto (detalle en las secciones de sesion):
+
+- Xcode Cloud compila con un **SDK mas viejo** que el Mac.
+- **ITMS-90626**: la metadata de App Intents no puede contener "mac".
+- **Borrar un app record es un error**: hay que RESTAURARLO, no recrearlo.
+- Export compliance declarado en el Info.plist.
+- El workflow tenia **Manual** como unica start condition: por eso ningun push
+  disparaba nada.
+- El entitlement `aps-environment` exige que el App ID tenga **Push
+  Notifications** habilitado, o la firma falla.
 
 ## Estado del proyecto
 
-La foto actual (decisiones, pendientes, trabas) vive en
-`_MinisBackup/shared/remotessh/ESTADO.md` dentro de iCloud Drive, replicado
-desde Minis. Merece la pena leerlo al empezar.
+**Este fichero es la fuente de verdad.** El `ESTADO.md` de
+`_MinisBackup/shared/remotessh/` al que apuntaba esta seccion **ya no existe**:
+aquel directorio compartido perdio ficheros por conflictos de sincronizacion.
+Git es lo unico fiable.
 
+## Piezas que viven FUERA del repo
+
+Nada de esto sale en `git log`, y sin ello la mitad de la app no funciona. Las
+copias canonicas estan versionadas en `scripts/`; las que **corren** viven fuera
+de iCloud a proposito, porque un fichero evicted a 0 bytes rompe en silencio.
+
+| Ruta (en el Mac) | Que es | Copia en el repo |
+|---|---|---|
+| `~/.claude/hooks/remotessh-notify.sh` | el hook: publica estado y manda el aviso | `scripts/remotessh-notify.sh` |
+| `~/.claude/hooks/summarise-turn` | binario que resume el turno con FoundationModels | `scripts/summarise-turn.swift` |
+| `~/.claude/hooks/apns-push` | binario que firma el JWT y habla con APNs | `scripts/apns-push.swift` |
+| `~/.claude/hooks/remotessh-notify.log` | **el primer sitio donde mirar** cuando no llega un aviso | — |
+| `~/.claude/settings.json` → `hooks` | registra 6 eventos de Claude Code | — |
+| `~/.codex/config.toml` → `[[hooks.*]]` | 3 eventos de Codex. **NO tocar `notify`** (es de Computer Use) | — |
+| `~/.remotessh/apns.json` + `AuthKey_*.p8` | credenciales de APNs, 0600 | — (secreto) |
+| `~/.remotessh/apns-token.json` | lo escribe la APP por SSH | — |
+| `~/.remotessh/state/<pane>.json` | estado de cada agente | — |
+| `~/.remotessh/badge` | contador del globo rojo | — |
+
+Recompilar los binarios tras tocar su fuente:
+
+```sh
+export DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer
+cd ~/Documents/Developer/RemoteSSH
+xcrun swiftc -swift-version 6 -O scripts/summarise-turn.swift -o ~/.claude/hooks/summarise-turn
+xcrun swiftc -swift-version 6 -O scripts/apns-push.swift     -o ~/.claude/hooks/apns-push
+cp scripts/remotessh-notify.sh ~/.claude/hooks/remotessh-notify.sh
+```
+
+**Diagnostico rapido cuando no llega una notificacion**, por orden:
+
+```sh
+tail -20 ~/.claude/hooks/remotessh-notify.log   # ¿se disparo el hook siquiera?
+```
+
+- `skip (X): N client(s) attached` → estabas mirando esa sesion; es a proposito.
+- `skip (X): turn took Ns` → turno de menos de 60s; a proposito.
+- `sent via APNs (X)` → camino nuevo, todo bien.
+- `sent (X)` a secas → cayo al respaldo de Brrr; mirar por que fallo APNs.
+- **nada** → el hook no llego a correr: mirar `$TMUX_PANE` (¿el agente corre
+  dentro de tmux?) y, en Codex, si el directorio esta **confiado**.
+
+En la app, Ajustes → Notificaciones → fila **Push** dice si hay token y si
+subio.
 
 ## Trabas especificas de este proyecto
 
