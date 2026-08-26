@@ -1,6 +1,16 @@
 # RemoteSSH
 
-> Contexto para Claude Code. Generado desde Minis (`/var/minis/shared/remotessh/ESTADO.md`).
+> **Contexto del repo para cualquier agente** — Claude Code y Codex. Es la
+> fuente de verdad del proyecto: estado, decisiones, trampas y bitacora por
+> sesion. Lo que NO esta aqui se pierde, porque casi todo lo que sostiene esta
+> app vive fuera de git (ver "Piezas que viven FUERA del repo").
+>
+> Codex busca `AGENTS.md`, no `CLAUDE.md`. Mientras no exista el enlace, un
+> Codex trabajando en este repo se pierde todo esto:
+>
+> ```sh
+> ln -s CLAUDE.md AGENTS.md
+> ```
 
 ## Identidad
 
