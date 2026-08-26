@@ -302,16 +302,41 @@ struct SessionListView: View {
         .refreshable { await model.refresh() }
     }
 
+    /// The banner shown when the connection failed but there are still
+    /// sessions on screen from a previous refresh.
+    ///
+    /// **It carries the same actions as the empty state, deliberately.** Those
+    /// used to live only in `emptyState`, which shows when there is nothing to
+    /// list — so anyone who had opened the app before saw their old sessions,
+    /// this banner saying the Mac might be asleep, and no way to do anything
+    /// about it. The list is kept on purpose when the Mac goes away (a sleeping
+    /// Mac hasn't lost its sessions), which made that the *common* case rather
+    /// than the rare one.
     private func errorBanner(_ message: String) -> some View {
-        HStack(alignment: .top, spacing: 9) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.warn)
-                .padding(.top, 1)
-            Text(message)
-                .font(.mono(11.5))
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 9) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.warn)
+                    .padding(.top, 1)
+                Text(message)
+                    .font(.mono(11.5))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 8) {
+                // Same order as the empty state, for the same reason: Wake on
+                // LAN is a magic packet and the only one that reaches a
+                // sleeping Mac, while Wake Display runs over SSH and needs it
+                // already answering.
+                if model.config.canWakeOnLAN {
+                    bannerButton("Wake Mac", prominent: true) { model.wakeOnLAN() }
+                }
+                bannerButton("Wake Display") { Task { await model.wakeDisplay() } }
+                bannerButton("Retry") { Task { await model.refresh() } }
+                Spacer(minLength: 0)
+            }
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 11)
@@ -324,6 +349,25 @@ struct SessionListView: View {
             RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous)
                 .stroke(Theme.warn.opacity(0.26), lineWidth: 1)
         )
+    }
+
+    private func bannerButton(
+        _ title: String,
+        prominent: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(prominent ? Theme.onLive : Theme.link)
+                .padding(.horizontal, 11)
+                .frame(height: 28)
+                .background(
+                    Capsule().fill(prominent ? Theme.live : Theme.surfaceRaised)
+                )
+        }
+        .buttonStyle(.plain)
+        .hoverEffect(.lift)
     }
 
     @ViewBuilder

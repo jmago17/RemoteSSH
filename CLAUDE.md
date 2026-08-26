@@ -1440,3 +1440,26 @@ vista, y SwiftUI no tiene motivo para observar UserDefaults: la subida ocurre en
 el primer `refresh()` con credenciales, que perfectamente puede pasar despues.
 Arreglado releyendo en `onAppear`. **Un indicador de diagnostico que se queda
 viejo es peor que no tenerlo**: manda a buscar donde no es.
+
+### El aviso de "el Mac no responde" no ofrecia como despertarlo (2026-08-26)
+
+Sintoma: al volver a la app sin conexion salia el banner amarillo *"…isn't
+answering… probably asleep or off"* **y ningun boton**.
+
+**Causa, y es un efecto secundario de un cambio propio.** Los botones (Wake Mac,
+Wake Display, Retry) vivian solo en `emptyState`, que se muestra cuando NO hay
+sesiones que listar. Pero `refresh()` **conserva la lista a proposito** cuando el
+sondeo falla — que el Mac se duerma no significa que sus sesiones hayan
+desaparecido — asi que cualquiera que hubiera abierto la app antes veia sus
+sesiones viejas, el banner, y ninguna forma de actuar. Al hacer esa decision se
+convirtio el caso "hay lista + hay error" en el **normal** en vez de en el raro,
+y ahi es donde faltaban las acciones.
+
+`errorBanner` lleva ahora las mismas acciones que el estado vacio, en el mismo
+orden y por el mismo motivo: **Wake on LAN es un magic packet y el unico que
+alcanza a un Mac dormido**; Wake Display corre `caffeinate` por SSH y necesita
+que ya conteste.
+
+**Leccion**: al decidir conservar estado en un caso de error, comprobar donde
+estaban las acciones de recuperacion. Puede que estuvieran atadas a la rama
+vacia que se acaba de dejar de usar.
