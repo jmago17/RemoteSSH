@@ -47,9 +47,12 @@ ver Trabas): el menu de slot con pulsacion larga, la altura del
 
 ## Pendiente
 
-- **Ver un push propio disparado por un agente de verdad.** El envio manual
-  funciona (`apns-push` → `OK`, notificacion entregada con badge). Falta el
-  camino entero cuando un agente termina solo. Se distingue en
+- **Ver un push propio disparado por un agente de verdad.** El envio manual esta
+  **verificado por Josu en el iPhone** (2026-08-26): notificacion de RemoteSSH
+  entregada y **globo rojo en su icono**, que era el objetivo entero. Ojo a la
+  distincion: que `apns-push` devuelva `OK` solo dice que APNs acepto el envio;
+  que aparezca la notificacion con badge solo se puede confirmar mirando el
+  telefono. Falta el camino entero cuando un agente termina solo. Se distingue en
   `~/.claude/hooks/remotessh-notify.log`: `sent via APNs` es el camino nuevo,
   `sent` a secas es el respaldo de Brrr.
 - **Codex no publica `SessionEnd`/`StopFailure`** (no dispara nada al arrancar,
@@ -1419,7 +1422,7 @@ Ahora hay una fila **Push** en Ajustes → Notificaciones con el estado real:
 **Regla general**: en algo que solo se puede diagnosticar desde el otro lado de
 un cable, un fallo silencioso no es prudencia, es quedarse ciego.
 
-### FUNCIONA: primer push propio entregado (2026-08-26)
+### FUNCIONA: primer push propio entregado y VISTO en el iPhone (2026-08-26)
 
 ```
 ~/.claude/hooks/apns-push --session Prueba --body "…" --badge 3   ->  OK
